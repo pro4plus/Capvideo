@@ -40,6 +40,7 @@ fun VideoTranslatorApp() {
     var isWorking by remember { mutableStateOf(false) }
     var subtitles by remember { mutableStateOf<List<Subtitle>>(emptyList()) }
     var detectedLang by remember { mutableStateOf("") }
+    var isArabicVideo by remember { mutableStateOf(false) }
     var exportResult by remember { mutableStateOf<VideoExporter.ExportResult?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -77,6 +78,22 @@ fun VideoTranslatorApp() {
                     Text("اللغة المكتشفة: $detectedLang", style = MaterialTheme.typography.bodyMedium)
                 }
 
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = isArabicVideo,
+                        onCheckedChange = { isArabicVideo = it },
+                        enabled = !isWorking
+                    )
+                    Text(
+                        "الفيديو بالعربية (يحمّل نموذجاً كبيراً ~318 ميجابايت مرة واحدة فقط)",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                Text(
+                    "بدون هذا الخيار، يُفترض أن الفيديو بالإنجليزية ويُحمَّل نموذجه الصغير (~40 ميجابايت مرة واحدة فقط).",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
                 Button(
                     enabled = videoUri != null && !isWorking,
                     onClick = {
@@ -97,26 +114,40 @@ fun VideoTranslatorApp() {
                                         context, uri, File(context.cacheDir, "audio_16k.wav")
                                     )
                                 }
-                                // Try English first, then Arabic, if no model is set.
-                                // The user can add a model for any language in models/<lang>/.
-                                var found = VoskTranscriber.transcribe(context, wav, "en")
-                                var lang = "en"
-                                if (found.isEmpty()) {
-                                    found = VoskTranscriber.transcribe(context, wav, "ar")
-                                    if (found.isNotEmpty()) lang = "ar"
+                                // Language chosen by the checkbox above. The
+                                // model downloads in-app on first use, then
+                                // transcription works fully offline.
+                                val lang = if (isArabicVideo) "ar" else "en"
+                                status = if (lang == "ar") {
+                                    "جارٍ تحميل نموذج Vosk العربي (~318 ميجابايت، مرة واحدة فقط)..."
+                                } else {
+                                    "جارٍ تحميل نموذج Vosk الإنجليزي (~40 ميجابايت، مرة واحدة فقط)..."
                                 }
-                                if (found.isEmpty()) {
-                                    status = "لم يتم تفريغ الصوت تلقائياً (نموذج Vosk غير مثبّت بعد). " +
-                                        "أضف كابشن يدوياً بالأسفل، أو ثبّت النموذج من الشرح في README، ثم أعد المحاولة."
+                                val modelReady = withContext(Dispatchers.IO) {
+                                    VoskTranscriber.ensureModel(context, lang)
+                                }
+                                if (!modelReady) {
+                                    status = "تعذّر تحميل نموذج Vosk. تحقق من الإنترنت ومساحة التخزين، ثم أعد المحاولة."
                                     subtitles = listOf(
                                         Subtitle(0, 5000, "اكتب الكابشن هنا", "", "ar")
                                     )
                                 } else {
-                                    detectedLang = lang
-                                    status = "تم التفريغ. جارٍ الترجمة إلى العربية..."
-                                    val translated = if (lang == "ar") found else Translator.translateToArabic(found)
-                                    subtitles = translated
-                                    status = "جاهز للمراجعة. عدّل أي سطر قبل التصدير، ثم اضغط تصدير."
+                                    status = "جارٍ تفريغ الصوت..."
+                                    val found = withContext(Dispatchers.IO) {
+                                        VoskTranscriber.transcribe(context, wav, lang)
+                                    }
+                                    if (found.isEmpty()) {
+                                        status = "لم يتم تفريغ الصوت تلقائياً. تأكد أن لغة الفيديو مطابقة للخيار المحدد، أو أضف كابشن يدوياً بالأسفل."
+                                        subtitles = listOf(
+                                            Subtitle(0, 5000, "اكتب الكابشن هنا", "", "ar")
+                                        )
+                                    } else {
+                                        detectedLang = lang
+                                        status = "تم التفريغ. جارٍ الترجمة إلى العربية..."
+                                        val translated = if (lang == "ar") found else Translator.translateToArabic(found)
+                                        subtitles = translated
+                                        status = "جاهز للمراجعة. عدّل أي سطر قبل التصدير، ثم اضغط تصدير."
+                                    }
                                 }
                             } catch (e: Exception) {
                                 status = "حدث خطأ: ${e.message}"
@@ -201,8 +232,8 @@ fun VideoTranslatorApp() {
 
                 Text(
                     "ملاحظة: الترجمة تعمل بدون خادم وبدون مفتاح API. " +
-                        "التفريغ الصوتي يحتاج نموذج Vosk لمرة واحدة (انظر README)، " +
-                        "وبعده يعمل التطبيق كاملاً على الجهاز.",
+                        "التفريغ الصوتي يحمّل نموذج Vosk داخل التطبيق مرة واحدة فقط عند أول استخدام، " +
+                        "وبعده يعمل التطبيق كاملاً على الجهاز بدون إنترنت.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
