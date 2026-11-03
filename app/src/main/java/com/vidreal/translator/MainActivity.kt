@@ -289,11 +289,11 @@ fun CapeoApp() {
             }
 
             // ---- Preview (top, like CapCut canvas) ----
-            // 300dp, not 400dp: the taller preview squeezed the tool
-            // panel below it into a thin strip, hiding its buttons
-            // and checkbox on smaller phones.
+            // 240dp in 1.10: the preview kept squeezing the settings
+            // panel into a thin strip. Shrinking it, plus moving the
+            // tools to a bottom icon bar, gives the panel real room.
             Box(
-                modifier = Modifier.fillMaxWidth().height(300.dp).background(Color.Black)
+                modifier = Modifier.fillMaxWidth().height(240.dp).background(Color.Black)
             ) {
                 if (previewUri != null) {
                     AndroidView(
@@ -362,11 +362,13 @@ fun CapeoApp() {
                                                 )
                                             } catch (_: Exception) {
                                             }
-                                            // 0.5x: the preview is about half
-                                            // the width of a 1080px video,
-                                            // so a size-64 caption reads as
-                                            // 32sp here, and 32->96 is obvious.
-                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.size * 0.5f)
+                                            // 0.75x in 1.10 (was 0.5x): the old
+                                            // scale halved every size, so a
+                                            // size-64 caption read as only
+                                            // 32sp and enlarging it still
+                                            // looked small. 0.75x keeps the
+                                            // preview honestly large.
+                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.size * 0.75f)
                                             setTextColor(android.graphics.Color.parseColor("#" + style.color.rgb))
                                             setShadowLayer(8f, 0f, 0f, android.graphics.Color.BLACK)
                                             setBackgroundColor(
@@ -469,36 +471,10 @@ fun CapeoApp() {
                 }
             }
 
-            // ---- Tools bar (CapCut-style) ----
-            // All five tools in one row, no horizontal scroll: in 1.8
-            // the last tools were off-screen and looked hidden.
-            // Short labels and weight distribution keep every tool visible.
-            val tools = listOf(
-                "video" to "فيديو",
-                "transcribe" to "تفريغ",
-                "text" to "نص",
-                "subtitles" to "ترجمات",
-                "share" to "مشاركة",
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                tools.forEach { (id, label) ->
-                    val selected = activeTool == id
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) Color(0xFF8B5CF6) else Color(0xFF2A2A2A))
-                            .clickable { activeTool = id }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) { Text(label, color = Color.White, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
-                }
-            }
-
-            // ---- Bottom panel for the selected tool ----
+            // ---- Settings panel for the selected tool ----
+            // In 1.10 the tools bar no longer sits here: it moved to
+            // a bottom icon bar, so this panel gets the full middle
+            // of the screen instead of a squeezed strip.
             // Every panel scrolls: in 1.8 the video/transcribe panels
             // were not scrollable, so their buttons and checkbox were
             // clipped when the panel was squeezed by the preview.
@@ -508,22 +484,22 @@ fun CapeoApp() {
                         modifier = Modifier.verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("اختر الفيديو", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                        Text("اختر الفيديو", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
                         Button(
                             onClick = { picker.launch("video/*") },
                             modifier = Modifier.fillMaxWidth().height(56.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
                         ) {
-                            Text("📁  اختر فيديو من جوالك", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("📁  اختر فيديو من جوالك", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         }
-                        if (pickedUri != null) Text("تم اختيار فيديو. انتقل إلى التفريغ.", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                        if (pickedUri != null) Text("تم اختيار فيديو. انتقل إلى التفريغ.", color = Color(0xFFAAAAAA), fontSize = 15.sp)
                         if (detectedLang.isNotEmpty()) Text("اللغة المكتشفة: $detectedLang", color = Color.White)
                     }
                     "transcribe" -> Column(
                         modifier = Modifier.verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("تفريغ وترجمة", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                        Text("تفريغ وترجمة", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
                         // Big toggle card instead of a small bare
                         // checkbox: in 1.8 the checkbox looked hidden
                         // in the dark panel. Tapping anywhere on the
@@ -554,11 +530,11 @@ fun CapeoApp() {
                                 Spacer(Modifier.width(12.dp))
                                 Column {
                                     Text("الفيديو بالعربية", color = Color.White, fontWeight = FontWeight.Bold)
-                                    Text("نموذج كبير ~318 ميجابايت، مرة واحدة فقط", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                                    Text("نموذج كبير ~318 ميجابايت، مرة واحدة فقط", color = Color(0xFFAAAAAA), fontSize = 15.sp)
                                 }
                             }
                         }
-                        Text("بدون هذا الخيار يُفترض الإنجليزية (~40 ميجابايت). التحميل يعمل كخدمة أمامية بإشعار، فيمكنك مغادرة التطبيق وسيستمر.", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                        Text("بدون هذا الخيار يُفترض الإنجليزية (~40 ميجابايت). التحميل يعمل كخدمة أمامية بإشعار، فيمكنك مغادرة التطبيق وسيستمر.", color = Color(0xFFAAAAAA), fontSize = 15.sp)
                         Button(onClick = { startTranscribe() }, enabled = pickedUri != null && !isWorking, modifier = Modifier.fillMaxWidth()) {
                             Text("تفريغ وترجمة")
                         }
@@ -567,7 +543,7 @@ fun CapeoApp() {
                         modifier = Modifier.verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("تنسيق النص", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                        Text("تنسيق النص", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
                         // Captions-AI preset: word-by-word reveal,
                         // bold sans, yellow highlight, bottom position.
                         Button(
@@ -578,7 +554,7 @@ fun CapeoApp() {
                                     color = CaptionColors.YELLOW,
                                     position = CaptionPosition.BOTTOM,
                                     background = CaptionBackground.OUTLINE,
-                                    size = 72,
+                                    size = 100,
                                 )
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -602,13 +578,13 @@ fun CapeoApp() {
                         Text(
                             if (style.wordByWord) "الكلمات تظهر واحدة تلو الأخرى مع تلوين الكلمة الحالية، مثل تطبيق Captions."
                             else "السطر كاملاً يظهر دفعة واحدة طوال مدته.",
-                            color = Color(0xFFAAAAAA), fontSize = 13.sp
+                            color = Color(0xFFAAAAAA), fontSize = 15.sp
                         )
                         Text("حجم الخط: ${style.size} — حرّك المزلاج وستتغير المعاينة فوراً", color = Color.White, fontWeight = FontWeight.Bold)
                         Slider(
                             value = style.size.toFloat(),
                             onValueChange = { style = style.copy(size = it.toInt()) },
-                            valueRange = 32f..96f
+                            valueRange = 40f..140f
                         )
                         // Live sample, keyed on style so it always reflects the slider.
                         key(style) {
@@ -627,7 +603,7 @@ fun CapeoApp() {
                                                 )
                                             } catch (_: Exception) {
                                             }
-                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.size * 0.5f)
+                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.size * 0.75f)
                                             setTextColor(android.graphics.Color.parseColor("#" + style.color.rgb))
                                             setShadowLayer(8f, 0f, 0f, android.graphics.Color.BLACK)
                                         }
@@ -688,8 +664,8 @@ fun CapeoApp() {
                         }
                     }
                     "subtitles" -> Column {
-                        Text("مراجعة الترجمة", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
-                        Text("اضغط أي مقطع في الشريط الزمني أعلاه لتعديله هنا.", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                        Text("مراجعة الترجمة", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+                        Text("اضغط أي مقطع في الشريط الزمني أعلاه لتعديله هنا.", color = Color(0xFFAAAAAA), fontSize = 15.sp)
                         Spacer(Modifier.height(8.dp))
                         if (subtitles.isEmpty()) {
                             Text("لا توجد ترجمات بعد. ابدأ بالتفريغ أولاً.", color = Color(0xFFAAAAAA))
@@ -715,16 +691,25 @@ fun CapeoApp() {
                         modifier = Modifier.verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("المشاركة والتصدير", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                        Text("المشاركة والتصدير", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+                        // Export lives here now (and in the top bar):
+                        // the old fixed bottom export bar was removed
+                        // in 1.10 to make room for the bottom icon bar.
+                        Button(
+                            onClick = { startExport(false) },
+                            enabled = subtitles.isNotEmpty() && !isWorking,
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
+                        ) { Text("🎬  تصدير فيديو + SRT", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
                         if (exportResult != null) {
                             Text("تم الحفظ:", color = Color.White)
-                            Text("الفيديو: ${exportResult!!.videoFile.name}", color = Color(0xFFAAAAAA), fontSize = 13.sp)
-                            Text("الترجمة: ${exportResult!!.srtFile.name}", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                            Text("الفيديو: ${exportResult!!.videoFile.name}", color = Color(0xFFAAAAAA), fontSize = 15.sp)
+                            Text("الترجمة: ${exportResult!!.srtFile.name}", color = Color(0xFFAAAAAA), fontSize = 15.sp)
                             Button(onClick = { shareExported() }, modifier = Modifier.fillMaxWidth()) {
                                 Text("مشاركة الفيديو (إنستغرام / تيك توك / واتساب)")
                             }
                         } else {
-                            Text("صدّر الفيديو أولاً من الزر العلوي، ثم شاركه من هنا.", color = Color(0xFFAAAAAA))
+                            Text("صدّر الفيديو من الزر أعلاه أو من زر التصدير في الأعلى، ثم شاركه من هنا.", color = Color(0xFFAAAAAA))
                         }
                         Button(onClick = { startExport(true) }, enabled = subtitles.isNotEmpty() && !isWorking, modifier = Modifier.fillMaxWidth()) {
                             Text("تصدير SRT فقط (بدون دمج)")
@@ -733,23 +718,44 @@ fun CapeoApp() {
                 }
             }
 
-            // ---- Fixed bottom export bar ----
-            // (see captionsPreviewText below for the word highlight)
+            // ---- Bottom icon bar (CapCut-style) ----
+            // The five tools are icons at the very bottom of the app,
+            // as requested in 1.10, with a large tap area each. This
+            // replaces both the middle tools bar and the fixed bottom
+            // export bar, so the settings panel above gets all the
+            // middle space instead of a squeezed strip.
+            val tools = listOf(
+                "video" to "🎬" to "فيديو",
+                "transcribe" to "🎙️" to "تفريغ",
+                "text" to "✍️" to "نص",
+                "subtitles" to "📝" to "ترجمات",
+                "share" to "📤" to "مشاركة",
+            )
             Row(
-                modifier = Modifier.fillMaxWidth().background(Color(0xFF111111)).padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.fillMaxWidth().background(Color(0xFF111111)).padding(vertical = 6.dp),
             ) {
-                Button(
-                    onClick = { startExport(false) },
-                    enabled = subtitles.isNotEmpty() && !isWorking,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
-                ) { Text("تصدير فيديو + SRT") }
-                OutlinedButton(
-                    onClick = { startExport(true) },
-                    enabled = subtitles.isNotEmpty() && !isWorking,
-                    modifier = Modifier.weight(1f)
-                ) { Text("SRT فقط") }
+                tools.forEach { (tool, label) ->
+                    val (id, icon) = tool
+                    val selected = activeTool == id
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) Color(0xFF2E1A5E) else Color.Transparent)
+                            .clickable { activeTool = id }
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(icon, fontSize = 24.sp)
+                        Text(
+                            label,
+                            color = if (selected) Color(0xFFC4B5FD) else Color(0xFFAAAAAA),
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
             }
         }
     }
