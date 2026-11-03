@@ -76,7 +76,14 @@ object Translator {
                         .addOnSuccessListener { cont.resume(it) }
                         .addOnFailureListener { cont.resume(sub.text) }
                 }
-                out += sub.copy(text = translated, originalText = sub.text, sourceLanguage = source)
+                // English word timings do not fit Arabic words, so
+                // spread the Arabic words evenly over the segment:
+                // the Captions-AI reveal still works, just evenly
+                // spaced instead of speech-synced.
+                out += sub.copy(
+                    text = translated, originalText = sub.text, sourceLanguage = source,
+                    words = SubtitleFormat.distributeWords(translated, sub.startMs, sub.endMs),
+                )
             }
             return out
         } finally {

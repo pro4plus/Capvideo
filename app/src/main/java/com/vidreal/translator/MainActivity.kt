@@ -289,8 +289,11 @@ fun CapeoApp() {
             }
 
             // ---- Preview (top, like CapCut canvas) ----
+            // 300dp, not 400dp: the taller preview squeezed the tool
+            // panel below it into a thin strip, hiding its buttons
+            // and checkbox on smaller phones.
             Box(
-                modifier = Modifier.fillMaxWidth().height(400.dp).background(Color.Black)
+                modifier = Modifier.fillMaxWidth().height(300.dp).background(Color.Black)
             ) {
                 if (previewUri != null) {
                     AndroidView(
@@ -333,16 +336,26 @@ fun CapeoApp() {
                             CaptionPosition.MIDDLE -> Alignment.Center
                             CaptionPosition.TOP -> Alignment.TopCenter
                         }
+                        // Captions-AI word index: which word is spoken
+                        // right now, or the last word already spoken.
+                        // Keying on it (not on every position tick)
+                        // recreates the overlay only when a new word
+                        // pops in, so there is no flicker.
+                        val wordIndex = if (style.wordByWord && currentSubtitle!!.words.isNotEmpty()) {
+                            val ws = currentSubtitle!!.words
+                            ws.indexOfFirst { positionMs in it.startMs..it.endMs }.takeIf { it >= 0 }
+                                ?: ws.indexOfLast { it.endMs <= positionMs }.takeIf { it >= 0 }
+                        } else null
                         Box(
                             modifier = Modifier.align(overlayAlign).padding(16.dp).fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
-                            key(style, currentSubtitle!!.text) {
+                            key(style, currentSubtitle!!.text, wordIndex) {
                                 AndroidView(
                                     factory = { ctx ->
                                         TextView(ctx).apply {
                                             gravity = Gravity.CENTER
-                                            text = currentSubtitle!!.text
+                                            text = captionsPreviewText(currentSubtitle!!, wordIndex, style)
                                             try {
                                                 typeface = android.graphics.Typeface.createFromAsset(
                                                     ctx.assets, "fonts/${style.font.fileName}"
@@ -369,8 +382,17 @@ fun CapeoApp() {
                         }
                     }
                 } else {
+                    // Empty-state button right on the canvas, so the
+                    // choose-video action is never hidden in a panel.
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("اختر فيديو من أداة الفيديو بالأسفل", color = Color(0xFF888888), textAlign = TextAlign.Center)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("لا يوجد فيديو بعد", color = Color(0xFF888888))
+                            Button(
+                                onClick = { picker.launch("video/*") },
+                                modifier = Modifier.height(56.dp).padding(horizontal = 24.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
+                            ) { Text("📁  اختر فيديو من جوالك", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+                        }
                     }
                 }
             }
@@ -448,45 +470,93 @@ fun CapeoApp() {
             }
 
             // ---- Tools bar (CapCut-style) ----
+            // All five tools in one row, no horizontal scroll: in 1.8
+            // the last tools were off-screen and looked hidden.
+            // Short labels and weight distribution keep every tool visible.
             val tools = listOf(
-                "video" to "🎬 فيديو",
-                "transcribe" to "🎙️ تفريغ",
-                "text" to "✍️ نص",
-                "subtitles" to "📝 ترجمات",
-                "share" to "📤 مشاركة",
+                "video" to "فيديو",
+                "transcribe" to "تفريغ",
+                "text" to "نص",
+                "subtitles" to "ترجمات",
+                "share" to "مشاركة",
             )
             Row(
-                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).horizontalScroll(rememberScrollState()).padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 tools.forEach { (id, label) ->
                     val selected = activeTool == id
                     Box(
                         modifier = Modifier
+                            .weight(1f)
                             .clip(RoundedCornerShape(20.dp))
                             .background(if (selected) Color(0xFF8B5CF6) else Color(0xFF2A2A2A))
                             .clickable { activeTool = id }
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) { Text(label, color = Color.White, fontSize = 14.sp) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) { Text(label, color = Color.White, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
                 }
             }
 
             // ---- Bottom panel for the selected tool ----
+            // Every panel scrolls: in 1.8 the video/transcribe panels
+            // were not scrollable, so their buttons and checkbox were
+            // clipped when the panel was squeezed by the preview.
             Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF1A1A1A)).padding(14.dp)) {
                 when (activeTool) {
-                    "video" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    "video" -> Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Text("اختر الفيديو", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
-                        Button(onClick = { picker.launch("video/*") }, modifier = Modifier.fillMaxWidth()) {
-                            Text("اختر فيديو من جوالك")
+                        Button(
+                            onClick = { picker.launch("video/*") },
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
+                        ) {
+                            Text("📁  اختر فيديو من جوالك", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                         if (pickedUri != null) Text("تم اختيار فيديو. انتقل إلى التفريغ.", color = Color(0xFFAAAAAA), fontSize = 13.sp)
                         if (detectedLang.isNotEmpty()) Text("اللغة المكتشفة: $detectedLang", color = Color.White)
                     }
-                    "transcribe" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    "transcribe" -> Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Text("تفريغ وترجمة", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = isArabicVideo, onCheckedChange = { isArabicVideo = it }, enabled = !isWorking)
-                            Text("الفيديو بالعربية (~318 ميجابايت مرة واحدة)", color = Color.White)
+                        // Big toggle card instead of a small bare
+                        // checkbox: in 1.8 the checkbox looked hidden
+                        // in the dark panel. Tapping anywhere on the
+                        // card toggles it, and the check square is
+                        // large and high-contrast.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isArabicVideo) Color(0xFF3B2A6B) else Color(0xFF2A2A2A))
+                                .border(
+                                    width = if (isArabicVideo) 2.dp else 1.dp,
+                                    color = if (isArabicVideo) Color(0xFF8B5CF6) else Color(0xFF555555),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable(enabled = !isWorking) { isArabicVideo = !isArabicVideo }
+                                .padding(14.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp))
+                                        .background(if (isArabicVideo) Color(0xFF8B5CF6) else Color.Transparent)
+                                        .border(2.dp, Color.White, RoundedCornerShape(6.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isArabicVideo) Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text("الفيديو بالعربية", color = Color.White, fontWeight = FontWeight.Bold)
+                                    Text("نموذج كبير ~318 ميجابايت، مرة واحدة فقط", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                                }
+                            }
                         }
                         Text("بدون هذا الخيار يُفترض الإنجليزية (~40 ميجابايت). التحميل يعمل كخدمة أمامية بإشعار، فيمكنك مغادرة التطبيق وسيستمر.", color = Color(0xFFAAAAAA), fontSize = 13.sp)
                         Button(onClick = { startTranscribe() }, enabled = pickedUri != null && !isWorking, modifier = Modifier.fillMaxWidth()) {
@@ -498,6 +568,42 @@ fun CapeoApp() {
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text("تنسيق النص", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                        // Captions-AI preset: word-by-word reveal,
+                        // bold sans, yellow highlight, bottom position.
+                        Button(
+                            onClick = {
+                                style = style.copy(
+                                    wordByWord = true,
+                                    font = CaptionFonts.SANS,
+                                    color = CaptionColors.YELLOW,
+                                    position = CaptionPosition.BOTTOM,
+                                    background = CaptionBackground.OUTLINE,
+                                    size = 72,
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
+                        ) { Text("✨ تطبيق نمط Captions AI", color = Color.Black, fontWeight = FontWeight.Bold) }
+                        Text("نمط الكابشن", color = Color.White, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { style = style.copy(wordByWord = true) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (style.wordByWord) Color(0xFF8B5CF6) else Color(0xFF2A2A2A)
+                                )
+                            ) { Text("كلمة بكلمة (Captions)") }
+                            Button(
+                                onClick = { style = style.copy(wordByWord = false) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (!style.wordByWord) Color(0xFF8B5CF6) else Color(0xFF2A2A2A)
+                                )
+                            ) { Text("سطر كامل") }
+                        }
+                        Text(
+                            if (style.wordByWord) "الكلمات تظهر واحدة تلو الأخرى مع تلوين الكلمة الحالية، مثل تطبيق Captions."
+                            else "السطر كاملاً يظهر دفعة واحدة طوال مدته.",
+                            color = Color(0xFFAAAAAA), fontSize = 13.sp
+                        )
                         Text("حجم الخط: ${style.size} — حرّك المزلاج وستتغير المعاينة فوراً", color = Color.White, fontWeight = FontWeight.Bold)
                         Slider(
                             value = style.size.toFloat(),
@@ -605,7 +711,10 @@ fun CapeoApp() {
                             }
                         }
                     }
-                    "share" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    "share" -> Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Text("المشاركة والتصدير", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
                         if (exportResult != null) {
                             Text("تم الحفظ:", color = Color.White)
@@ -625,6 +734,7 @@ fun CapeoApp() {
             }
 
             // ---- Fixed bottom export bar ----
+            // (see captionsPreviewText below for the word highlight)
             Row(
                 modifier = Modifier.fillMaxWidth().background(Color(0xFF111111)).padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -643,4 +753,38 @@ fun CapeoApp() {
             }
         }
     }
+}
+
+/**
+ * Text for the preview overlay, Captions-AI style: when word-by-word
+ * is on, only the words spoken so far are shown, earlier words in
+ * white and the current word in the chosen highlight colour (yellow
+ * when the chosen colour is white, otherwise it would be invisible).
+ * When word-by-word is off, or the segment has no word timings
+ * (manual captions), the whole line is shown as before.
+ */
+private fun captionsPreviewText(
+    sub: Subtitle,
+    wordIndex: Int?,
+    style: CaptionStyle,
+): CharSequence {
+    if (!style.wordByWord || sub.words.isEmpty() || wordIndex == null) {
+        return sub.text
+    }
+    val highlightRgb = if (style.color.rgb == "FFFFFF") "FFFF00" else style.color.rgb
+    val builder = android.text.SpannableStringBuilder()
+    sub.words.take(wordIndex + 1).forEachIndexed { i, word ->
+        if (i > 0) builder.append(" ")
+        val start = builder.length
+        builder.append(word.text)
+        val colour = if (i == wordIndex) highlightRgb else "FFFFFF"
+        builder.setSpan(
+            android.text.style.ForegroundColorSpan(
+                android.graphics.Color.parseColor("#$colour")
+            ),
+            start, builder.length,
+            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+    }
+    return builder
 }

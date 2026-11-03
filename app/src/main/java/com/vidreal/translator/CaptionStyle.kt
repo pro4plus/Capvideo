@@ -42,6 +42,9 @@ data class CaptionStyle(
     val color: CaptionColor = CaptionColors.WHITE,
     val position: CaptionPosition = CaptionPosition.BOTTOM,
     val background: CaptionBackground = CaptionBackground.OUTLINE,
+    /** Captions-AI mode: words appear one by one as spoken, with the
+     *  current word highlighted. When false, whole lines appear at once. */
+    val wordByWord: Boolean = true,
 ) {
     /** ASS colour in &HAABBGGRR form (alpha 00 = opaque). */
     fun assColor(): String {

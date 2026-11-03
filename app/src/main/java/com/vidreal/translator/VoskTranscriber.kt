@@ -104,7 +104,7 @@ object VoskTranscriber {
             val existing = if (zipFile.exists()) zipFile.length() else 0L
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", "Capeo/1.8")
+            connection.setRequestProperty("User-Agent", "Capeo/1.9")
             connection.connectTimeout = 30_000
             connection.readTimeout = 60_000
             if (existing > 0) {
@@ -233,31 +233,54 @@ object VoskTranscriber {
         try {
             val obj = JSONObject(json)
             val result = obj.optJSONArray("result") ?: return out
-            // Group words into sentences: break on a pause longer than 0.5s
-            // or after 8 words, so captions stay readable.
-            var currentWords = mutableListOf<String>()
-            var start = 0.0
-            var end = 0.0
-            fun flush() {
-                if (currentWords.isEmpty()) return
-                val text = currentWords.joinToString(" ")
-                out += SubtitleFormat.splitLong(
-                    text, (start * 1000).toLong(), (end * 1000).toLong(), text, lang
-                )
-                currentWords = mutableListOf()
-            }
+            // Keep every word with its own timing: that is what the
+            // Captions-AI word-by-word reveal needs. Group words into
+            // segments: break on a pause longer than 0.5s or after 8
+            // words, so captions stay readable, then split any segment
+            // longer than ~42 characters into word chunks.
+            val allWords = mutableListOf<Word>()
             for (i in 0 until result.length()) {
                 val w = result.getJSONObject(i)
                 val word = w.optString("word")
-                val ws = w.optDouble("start")
-                val we = w.optDouble("end")
-                if (currentWords.isEmpty()) start = ws
-                if (currentWords.isNotEmpty() && (ws - end > 0.5 || currentWords.size >= 8)) {
-                    flush()
-                    start = ws
+                if (word.isBlank()) continue
+                allWords += Word(
+                    word,
+                    (w.optDouble("start") * 1000).toLong(),
+                    (w.optDouble("end") * 1000).toLong(),
+                )
+            }
+            var current = mutableListOf<Word>()
+            var prevEnd = 0L
+            fun flush() {
+                if (current.isEmpty()) return
+                // Split long segments by word count / text length,
+                // keeping each chunk's words together.
+                var chunk = mutableListOf<Word>()
+                var len = 0
+                fun emitChunk() {
+                    if (chunk.isEmpty()) return
+                    val text = chunk.joinToString(" ") { it.text }
+                    out += Subtitle(
+                        chunk.first().startMs, chunk.last().endMs,
+                        text, text, lang, chunk.toList()
+                    )
+                    chunk = mutableListOf()
+                    len = 0
                 }
-                currentWords.add(word)
-                end = we
+                for (w in current) {
+                    if (chunk.isNotEmpty() && len + w.text.length + 1 > 42) emitChunk()
+                    chunk += w
+                    len += w.text.length + 1
+                }
+                emitChunk()
+                current = mutableListOf()
+            }
+            for (w in allWords) {
+                if (current.isNotEmpty() && (w.startMs - prevEnd > 500 || current.size >= 8)) {
+                    flush()
+                }
+                current += w
+                prevEnd = w.endMs
             }
             flush()
         } catch (e: Exception) {
