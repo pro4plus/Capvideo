@@ -60,7 +60,12 @@ dependencies {
 
     // FFmpeg with libass, for burning Arabic subtitles into the video.
     // This is a large native library; first build downloads it from Maven.
-    implementation("com.arthenica:ffmpeg-kit-full:6.0-2")
+    // NOTE: com.arthenica:ffmpeg-kit-* was retired and its binaries were
+    // removed from Maven Central in April 2025, so it can never resolve
+    // on a clean CI build. dev.ffmpegkit-maintained is the drop-in
+    // replacement: same package (com.arthenica.ffmpegkit) and same API,
+    // so no call sites change. 6.0.3 keeps the original FFmpeg 6.0 line.
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:6.0.3")
 
     // Vosk offline speech recognition (optional AAR, see README section 3):
     // Download vosk-android AAR from https://github.com/alphacep/vosk-android
