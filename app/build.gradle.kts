@@ -12,11 +12,31 @@ android {
         applicationId = "com.vidreal.translator"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
+    }
+
+    // Fixed debug signing key, added in 1.5: every GitHub runner used to
+    // generate its own temporary debug keystore, so each build had a
+    // different signature and Android refused to install a new version
+    // over an old one ("cannot install if already installed"). This
+    // keystore (app/debug.keystore, standard debug password "android")
+    // is committed so all builds share one signature. It is a DEBUG
+    // key only, never a release key: anyone can create a debug key,
+    // and it must not be used for a Play Store release.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
         }
@@ -65,7 +85,16 @@ dependencies {
     // on a clean CI build. dev.ffmpegkit-maintained is the drop-in
     // replacement: same package (com.arthenica.ffmpegkit) and same API,
     // so no call sites change. 6.0.3 keeps the original FFmpeg 6.0 line.
-    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:6.0.3")
+    // IMPORTANT, learned from the 1.4 export failure: the non-GPL
+    // "full" variant does NOT contain libx264 (x264 is GPL), so its
+    // FFmpeg build has no -preset option at all and the export died
+    // with "Unrecognized option 'preset'". The "full-gpl" variant does
+    // contain libx264 (verified: its libavcodec strings list libx264
+    // and its configure line has --enable-gpl --enable-libx264), so
+    // -c:v libx264 -preset veryfast -crf 23 works. GPL code is now
+    // part of this debug app; that is fine for a free personal build
+    // but must be honoured if the app is ever distributed publicly.
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full-gpl:6.0.3")
     // REQUIRED, and the root cause of the export NoClassDefFoundError:
     // the maintained fork ships its AAR as a prebuilt file, so its
     // published POM declares no dependencies at all, and Gradle never
