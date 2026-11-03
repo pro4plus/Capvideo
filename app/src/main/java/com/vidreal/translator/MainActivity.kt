@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -125,27 +126,45 @@ fun VideoTranslatorApp() {
                                 } else {
                                     "جارٍ تحميل نموذج Vosk الإنجليزي (~40 ميجابايت، مرة واحدة فقط)..."
                                 }
-                                val modelError = withContext(Dispatchers.IO) {
-                                    VoskTranscriber.ensureModelWithError(context, lang) { downloaded, total ->
-                                        // This callback runs on IO; hop to
-                                        // Main before touching Compose state.
-                                        scope.launch {
-                                            if (downloaded < 0) {
+                                // Model download now runs in a foreground
+                                // service (ModelDownloadService), not in
+                                // this screen's coroutine: switching to
+                                // another app used to stop the download
+                                // because the screen's work could be
+                                // killed with it. The screen only waits
+                                // here and watches the service's state;
+                                // if a download is already running (the
+                                // user left and came back), this tap
+                                // joins it instead of starting a second one.
+                                val modelError: String? =
+                                    if (VoskTranscriber.isModelReady(context, lang)) {
+                                        null
+                                    } else {
+                                        if (!ModelDownloadState.running) {
+                                            ModelDownloadService.start(context, lang)
+                                        }
+                                        while (!ModelDownloadState.done) {
+                                            val p = ModelDownloadState.progress.value
+                                            if (p == null) {
+                                                progress = null
+                                                status = "جارٍ بدء تحميل نموذج Vosk..."
+                                            } else if (p.first < 0) {
                                                 progress = null
                                                 status = "تم تحميل النموذج، جارٍ فك ضغطه..."
-                                            } else if (total > 0) {
-                                                val pct = (downloaded * 100 / total).toInt()
-                                                progress = downloaded.toFloat() / total.toFloat()
-                                                val downMb = downloaded / 1_048_576
-                                                val totalMb = total / 1_048_576
-                                                status = "تحميل نموذج Vosk: $pct% ($downMb من $totalMb ميجابايت)..."
+                                            } else if (p.second > 0) {
+                                                val pct = (p.first * 100 / p.second).toInt()
+                                                progress = p.first.toFloat() / p.second.toFloat()
+                                                status = "تحميل نموذج Vosk: $pct% (${p.first / 1_048_576} من ${p.second / 1_048_576} ميجابايت)... يمكنك مغادرة التطبيق وسيستمر التحميل."
                                             } else {
                                                 progress = null
-                                                status = "تحميل نموذج Vosk: ${downloaded / 1_048_576} ميجابايت..."
+                                                status = "تحميل نموذج Vosk: ${p.first / 1_048_576} ميجابايت..."
                                             }
+                                            delay(400)
                                         }
+                                        val err = ModelDownloadState.error
+                                        ModelDownloadState.reset()
+                                        err
                                     }
-                                }
                                 progress = null
                                 if (modelError != null) {
                                     status = "تعذّر تحميل نموذج Vosk: $modelError"
