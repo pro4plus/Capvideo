@@ -53,7 +53,11 @@ object SubtitleFormat {
      * Note: Noto Sans Arabic was tested and dropped a glyph for "ث" in
      * medial position under libass; Noto Naskh Arabic renders it correctly.
      */
-    fun toAss(subtitles: List<Subtitle>): String {
+    fun toAss(subtitles: List<Subtitle>, style: CaptionStyle = CaptionStyle()): String {
+        // The style the user picked in the Capeo review screen is the
+        // style burned in: font family, size, colour, position and
+        // background all come from it, so preview and export match.
+        val backColour = if (style.background == CaptionBackground.BOX) "&H80000000" else "&H80000000"
         val header = """
             [Script Info]
             ScriptType: v4.00+
@@ -64,7 +68,7 @@ object SubtitleFormat {
 
             [V4+ Styles]
             Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-            Style: Arabic, Noto Naskh Arabic, 64, &H00FFFFFF, &H000000FF, &H80000000, &H80000000, -1, 0, 0, 0, 100, 100, 0, 0, 1, 3, 0, 2, 80, 80, 140, 1
+            Style: Arabic, ${style.font.familyName}, ${style.size}, ${style.assColor()}, &H000000FF, &H80000000, $backColour, -1, 0, 0, 0, 100, 100, 0, 0, ${style.background.assBorderStyle}, 3, 0, ${style.position.assAlignment}, 80, 80, ${style.marginV()}, 1
 
             [Events]
             Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

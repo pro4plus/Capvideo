@@ -48,6 +48,7 @@ object VideoExporter {
         subtitles: List<Subtitle>,
         outputDir: File,
         onLog: (String) -> Unit = {},
+        style: CaptionStyle = CaptionStyle(),
     ): ExportResult {
         require(inputVideo.isFile && inputVideo.length() > 0) {
             "ملف الفيديو غير موجود أو فارغ. أعد اختيار الفيديو ثم حاول التصدير من جديد."
@@ -57,21 +58,30 @@ object VideoExporter {
         val srtFile = exportSrtOnly(subtitles, outputDir)
 
         val assFile = File(context.cacheDir, "captions_ar.ass")
-        assFile.writeText(SubtitleFormat.toAss(subtitles))
+        assFile.writeText(SubtitleFormat.toAss(subtitles, style))
 
         val fontDir = File(context.cacheDir, "fonts")
         fontDir.mkdirs()
-        val fontFile = File(fontDir, "NotoNaskhArabic-Regular.ttf")
-        if (!fontFile.exists()) {
-            try {
-                context.assets.open("fonts/NotoNaskhArabic-Regular.ttf").use { input ->
-                    fontFile.outputStream().use { output -> input.copyTo(output) }
+        // Copy every bundled Arabic font, not just the selected one:
+        // fontconfig scans the whole directory, and the user may
+        // change fonts between exports without reinstalling.
+        for (font in CaptionFonts.ALL) {
+            val f = File(fontDir, font.fileName)
+            if (!f.exists() || f.length() == 0L) {
+                try {
+                    context.assets.open("fonts/${font.fileName}").use { input ->
+                        f.outputStream().use { output -> input.copyTo(output) }
+                    }
+                } catch (_: Exception) {
+                    // A missing extra font is not fatal; the selected
+                    // font below is checked strictly.
                 }
-            } catch (e: Exception) {
-                throw RuntimeException("خط العربية غير موجود في التطبيق، ولا يمكن دمج الترجمة بدونه.", e)
             }
         }
-        require(fontFile.length() > 0) { "خط العربية تالف أو فارغ في التطبيق." }
+        val fontFile = File(fontDir, style.font.fileName)
+        require(fontFile.exists() && fontFile.length() > 0) {
+            "خط ${style.font.displayName} غير موجود في التطبيق، ولا يمكن دمج الترجمة بدونه."
+        }
 
         // Official FFmpegKit requirement on Android, missing until now:
         // Android has no default fontconfig configuration, so libass
@@ -107,14 +117,12 @@ object VideoExporter {
 
         val videoOut = File(outputDir, "video_with_arabic_subtitles.mp4")
         // fontsdir + force_style tells libass where the Arabic font is.
-        // Passed as one filter argument (no shell-style quoting), with
-        // an explicit encoder and the veryfast preset: the default
-        // medium preset re-encodes slowly on phones and is the most
-        // likely reason a long export was killed mid-way.
+        // Every value here comes from the user's review-screen style,
+        // so the exported video matches the preview exactly.
         // The single quotes here are FFmpeg filter syntax (they protect
         // the commas inside force_style), not shell quoting: with an
         // argument array there is no shell to strip them.
-        val filter = "subtitles='${assFile.absolutePath}':fontsdir='${fontDir.absolutePath}':force_style='FontName=Noto Naskh Arabic,FontSize=64,PrimaryColour=&HFFFFFF&,OutlineColour=&H80000000&,BorderStyle=1,Outline=3,Alignment=2,MarginV=140'"
+        val filter = "subtitles='${assFile.absolutePath}':fontsdir='${fontDir.absolutePath}':force_style='FontName=${style.font.familyName},FontSize=${style.size},PrimaryColour=${style.assColor()},OutlineColour=&H80000000&,BorderStyle=${style.background.assBorderStyle},Outline=3,Alignment=${style.position.assAlignment},MarginV=${style.marginV()}'"
         val arguments = arrayOf(
             "-y",
             "-i", inputVideo.absolutePath,
