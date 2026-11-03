@@ -12,8 +12,8 @@ android {
         applicationId = "com.vidreal.translator"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     buildTypes {
@@ -66,6 +66,17 @@ dependencies {
     // replacement: same package (com.arthenica.ffmpegkit) and same API,
     // so no call sites change. 6.0.3 keeps the original FFmpeg 6.0 line.
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:6.0.3")
+    // REQUIRED, and the root cause of the export NoClassDefFoundError:
+    // the maintained fork ships its AAR as a prebuilt file, so its
+    // published POM declares no dependencies at all, and Gradle never
+    // pulls in smart-exception even though FFmpegKitConfig's static
+    // initializer calls Exceptions.registerRootPackage on first use.
+    // Without this line the project compiles, then the very first
+    // FFmpegKit call dies with NoClassDefFoundError for
+    // FFmpegKitConfig. This jar (plus its transitive
+    // smart-exception-common) fixes it. Verified present on Maven
+    // Central: com.arthenica:smart-exception-java:0.2.1.
+    implementation("com.arthenica:smart-exception-java:0.2.1")
 
     // Vosk offline speech recognition, from Maven Central (no local AAR
     // needed). The AAR must be declared with @aar, otherwise Gradle
