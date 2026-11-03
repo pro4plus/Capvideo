@@ -49,51 +49,106 @@ object VoskTranscriber {
         return dir.isDirectory && File(dir, "am/final.mdl").isFile
     }
 
+    /** Free space needed to download AND extract the model, with margin.
+     *  Verified 2026-11-03: the Arabic zip is 333 MB but extracts to
+     *  698 MB, so the phone needs ~1.1 GB free at peak, not 318 MB.
+     *  The English zip is 41 MB and extracts to ~100 MB. */
+    fun requiredFreeBytes(lang: String): Long = when (lang) {
+        "ar" -> 1_150_000_000L
+        "en" -> 180_000_000L
+        else -> 0L
+    }
+
+    fun ensureModel(
+        context: Context,
+        lang: String,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): Boolean = ensureModelWithError(context, lang, onProgress) == null
+
     /**
      * Download and extract the model for [lang] on first use.
-     * Must be called off the main thread. Returns true when the model
-     * is ready to transcribe with. A failed download cleans up the
-     * partial model so the next attempt starts fresh.
+     * Must be called off the main thread. Returns null on success,
+     * or a readable reason on failure — the old version swallowed
+     * every reason and the UI could only say "check internet", which
+     * is why a storage or interrupted-download failure looked
+     * identical to a network failure.
      *
      * [onProgress] is called from the caller's thread with
      * (downloadedBytes, totalBytes); totalBytes is -1 when the size
      * is unknown, and both are -1 while the zip is being extracted,
      * so the UI can always show where the download actually is
      * instead of sitting silently for minutes.
+     *
+     * Downloads resume: a partial zip from an interrupted attempt is
+     * continued with a Range request instead of starting over, and
+     * connect/read timeouts turn a stalled connection into a
+     * reported failure instead of an endless hang.
      */
-    fun ensureModel(
+    fun ensureModelWithError(
         context: Context,
         lang: String,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
-    ): Boolean {
-        if (isModelReady(context, lang)) return true
-        val url = modelUrl(lang) ?: return false
+    ): String? {
+        if (isModelReady(context, lang)) return null
+        val url = modelUrl(lang) ?: return "لغة غير مدعومة: $lang"
+        val free = minOf(context.cacheDir.usableSpace, context.filesDir.usableSpace)
+        val required = requiredFreeBytes(lang)
+        if (free in 1 until required) {
+            return "المساحة الحرة غير كافية: المتاح ${free / 1_048_576} ميجابايت، " +
+                "والنموذج يحتاج حوالي ${required / 1_048_576} ميجابايت " +
+                "(تحميل + فك ضغط). حرّر مساحة ثم أعد المحاولة."
+        }
         val dir = modelDir(context, lang)
         val zipFile = File(context.cacheDir, "vosk-model-$lang.zip")
         try {
+            val existing = if (zipFile.exists()) zipFile.length() else 0L
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", "VideoTranslator/1.2")
+            connection.setRequestProperty("User-Agent", "VideoTranslator/1.3")
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 60_000
+            if (existing > 0) {
+                connection.setRequestProperty("Range", "bytes=$existing-")
+            }
             connection.connect()
-            if (connection.responseCode !in 200..299) return false
-            val total = connection.contentLengthLong
-            var downloaded = 0L
+            val code = connection.responseCode
+            if (code != 200 && code != 206 && code != 416) {
+                return "فشل الاتصال بخادم النماذج: رمز HTTP $code"
+            }
+            val resumed = code == 206
+            if (code != 416 && !resumed && existing > 0) {
+                // Server ignored the Range request: start clean.
+                zipFile.delete()
+            }
+            val remaining = connection.contentLengthLong
+            val total = if (resumed && remaining > 0) existing + remaining else remaining
+            var downloaded = if (resumed) existing else 0L
             var lastReported = -1L
-            connection.inputStream.use { input ->
-                zipFile.outputStream().use { output ->
-                    val buffer = ByteArray(8192)
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        // Report at most every ~256 KB, plus at 100%.
-                        if (downloaded - lastReported >= 262144 || (total > 0 && downloaded >= total)) {
-                            lastReported = downloaded
-                            onProgress(downloaded, total)
+            if (code != 416) {
+                connection.inputStream.use { input ->
+                    java.io.FileOutputStream(zipFile, resumed).use { output ->
+                        val buffer = ByteArray(8192)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            // Report at most every ~256 KB, plus at 100%.
+                            if (downloaded - lastReported >= 262144 || (total > 0 && downloaded >= total)) {
+                                lastReported = downloaded
+                                onProgress(downloaded, total)
+                            }
                         }
                     }
                 }
+            } else {
+                // 416 = the existing zip is already complete; skip
+                // straight to extraction instead of failing.
+                downloaded = existing
+            }
+            if (total > 0 && downloaded < total) {
+                return "اكتمل التحميل ناقصاً: وصل $downloaded من $total بايت. " +
+                    "أعد المحاولة وسيُستأنف التحميل من حيث توقف."
             }
             onProgress(downloaded, total)
             // Extraction phase: no byte counter is meaningful here.
@@ -124,11 +179,16 @@ object VoskTranscriber {
                 }
             }
             zipFile.delete()
-            return isModelReady(context, lang)
+            return if (isModelReady(context, lang)) {
+                null
+            } else {
+                "النموذج غير مكتمل بعد فك الضغط: ملف am/final.mdl غير موجود."
+            }
         } catch (e: Exception) {
+            // Delete only the partial extraction, never the zip:
+            // keeping it lets the next attempt resume the download.
             try { if (dir.exists()) dir.deleteRecursively() } catch (_: Exception) {}
-            try { if (zipFile.exists()) zipFile.delete() } catch (_: Exception) {}
-            return false
+            return "خطأ أثناء تحميل/فك النموذج (${e.javaClass.simpleName}): ${e.message}"
         }
     }
 

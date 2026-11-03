@@ -125,8 +125,8 @@ fun VideoTranslatorApp() {
                                 } else {
                                     "جارٍ تحميل نموذج Vosk الإنجليزي (~40 ميجابايت، مرة واحدة فقط)..."
                                 }
-                                val modelReady = withContext(Dispatchers.IO) {
-                                    VoskTranscriber.ensureModel(context, lang) { downloaded, total ->
+                                val modelError = withContext(Dispatchers.IO) {
+                                    VoskTranscriber.ensureModelWithError(context, lang) { downloaded, total ->
                                         // This callback runs on IO; hop to
                                         // Main before touching Compose state.
                                         scope.launch {
@@ -147,8 +147,8 @@ fun VideoTranslatorApp() {
                                     }
                                 }
                                 progress = null
-                                if (!modelReady) {
-                                    status = "تعذّر تحميل نموذج Vosk. تحقق من الإنترنت ومساحة التخزين، ثم أعد المحاولة."
+                                if (modelError != null) {
+                                    status = "تعذّر تحميل نموذج Vosk: $modelError"
                                     subtitles = listOf(
                                         Subtitle(0, 5000, "اكتب الكابشن هنا", "", "ar")
                                     )
@@ -171,7 +171,7 @@ fun VideoTranslatorApp() {
                                     }
                                 }
                             } catch (e: Throwable) {
-                                status = "حدث خطأ: ${e.message}"
+                                status = "حدث خطأ (${e.javaClass.simpleName}): ${e.message}"
                             } finally {
                                 progress = null
                                 isWorking = false
@@ -236,8 +236,12 @@ fun VideoTranslatorApp() {
                                 } catch (e: Throwable) {
                                     // Throwable, not just Exception: a
                                     // failure here must show a message,
-                                    // never silently close the app.
-                                    status = "فشل التصدير: ${e.message}"
+                                    // never silently close the app. The
+                                    // class name is included on purpose:
+                                    // it is what identifies an FFmpegKit
+                                    // native-load failure vs. a filter
+                                    // failure in the next screenshot.
+                                    status = "فشل التصدير (${e.javaClass.simpleName}): ${e.message}"
                                 } finally {
                                     progress = null
                                     isWorking = false
@@ -262,7 +266,7 @@ fun VideoTranslatorApp() {
                                     }
                                     status = "تم حفظ ملف SRT فقط في: ${srt.parent}/${srt.name}. استخدمه إذا فشل الدمج على جهازك."
                                 } catch (e: Throwable) {
-                                    status = "فشل حفظ SRT: ${e.message}"
+                                    status = "فشل حفظ SRT (${e.javaClass.simpleName}): ${e.message}"
                                 } finally {
                                     isWorking = false
                                 }
@@ -293,6 +297,13 @@ fun VideoTranslatorApp() {
                     "ملاحظة: الترجمة تعمل بدون خادم وبدون مفتاح API. " +
                         "التفريغ الصوتي يحمّل نموذج Vosk داخل التطبيق مرة واحدة فقط عند أول استخدام، " +
                         "وبعده يعمل التطبيق كاملاً على الجهاز بدون إنترنت.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Text(
+                    "تشخيص: معمارية الجهاز ${android.os.Build.SUPPORTED_ABIS.joinToString()}، " +
+                        "مساحة حرة ${context.filesDir.usableSpace / 1_048_576} ميجابايت. " +
+                        "النموذج العربي يحتاج ~1100 ميجابايت حرة وقت التحميل والفك.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }

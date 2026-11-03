@@ -2,6 +2,7 @@ package com.vidreal.translator
 
 import android.content.Context
 import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 
@@ -71,6 +72,23 @@ object VideoExporter {
             }
         }
         require(fontFile.length() > 0) { "خط العربية تالف أو فارغ في التطبيق." }
+
+        // Official FFmpegKit requirement on Android, missing until now:
+        // Android has no default fontconfig configuration, so libass
+        // cannot find the Arabic font from the filter's fontsdir alone.
+        // Registering the font directory (with an explicit family ->
+        // file mapping) is what makes the subtitles filter find
+        // "Noto Naskh Arabic". A failure here must not abort the
+        // export by itself: the filter still has fontsdir as fallback.
+        try {
+            FFmpegKitConfig.setFontDirectoryList(
+                context,
+                listOf(fontDir.absolutePath, "/system/fonts"),
+                mapOf("Noto Naskh Arabic" to "NotoNaskhArabic-Regular.ttf"),
+            )
+        } catch (e: Exception) {
+            onLog("Font directory registration failed: ${e.message}")
+        }
 
         val videoOut = File(outputDir, "video_with_arabic_subtitles.mp4")
         // fontsdir + force_style tells libass where the Arabic font is.
