@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Capeo logo: a play triangle over two subtitle lines, centred in the
+     adaptive-icon safe zone (66x66dp centred in 108x108dp). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Play triangle -->
+    <path
+        android:pathData="M44,32 L74,54 L44,76 z"
+        android:fillColor="#FFFFFF" />
+    <!-- Subtitle lines -->
+    <path
+        android:pathData="M30,82h48v4H30z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="230" />
+    <path
+        android:pathData="M38,90h32v4H38z"
+        android:fillColor="#A5F3FC"
+        android:fillAlpha="230" />
+</vector>
