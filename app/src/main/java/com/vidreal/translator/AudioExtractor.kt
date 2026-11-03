@@ -23,7 +23,7 @@ object AudioExtractor {
         var trackIndex = -1
         var format: MediaFormat? = null
         for (i in 0 until extractor.trackCount) {
-            val f = extractor.getFormat(i)
+            val f = extractor.getTrackFormat(i)
             val mime = f.getString(MediaFormat.KEY_MIME) ?: continue
             if (mime.startsWith("audio/")) {
                 trackIndex = i
