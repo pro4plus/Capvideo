@@ -41,6 +41,7 @@ fun VideoTranslatorApp() {
     var subtitles by remember { mutableStateOf<List<Subtitle>>(emptyList()) }
     var detectedLang by remember { mutableStateOf("") }
     var isArabicVideo by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<Float?>(null) }
     var exportResult by remember { mutableStateOf<VideoExporter.ExportResult?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -99,6 +100,7 @@ fun VideoTranslatorApp() {
                     onClick = {
                         val uri = videoUri ?: return@Button
                         isWorking = true
+                        progress = null
                         status = "جارٍ استخراج الصوت وتفريغه..."
                         scope.launch {
                             try {
@@ -124,8 +126,27 @@ fun VideoTranslatorApp() {
                                     "جارٍ تحميل نموذج Vosk الإنجليزي (~40 ميجابايت، مرة واحدة فقط)..."
                                 }
                                 val modelReady = withContext(Dispatchers.IO) {
-                                    VoskTranscriber.ensureModel(context, lang)
+                                    VoskTranscriber.ensureModel(context, lang) { downloaded, total ->
+                                        // This callback runs on IO; hop to
+                                        // Main before touching Compose state.
+                                        scope.launch {
+                                            if (downloaded < 0) {
+                                                progress = null
+                                                status = "تم تحميل النموذج، جارٍ فك ضغطه..."
+                                            } else if (total > 0) {
+                                                val pct = (downloaded * 100 / total).toInt()
+                                                progress = downloaded.toFloat() / total.toFloat()
+                                                val downMb = downloaded / 1_048_576
+                                                val totalMb = total / 1_048_576
+                                                status = "تحميل نموذج Vosk: $pct% ($downMb من $totalMb ميجابايت)..."
+                                            } else {
+                                                progress = null
+                                                status = "تحميل نموذج Vosk: ${downloaded / 1_048_576} ميجابايت..."
+                                            }
+                                        }
+                                    }
                                 }
+                                progress = null
                                 if (!modelReady) {
                                     status = "تعذّر تحميل نموذج Vosk. تحقق من الإنترنت ومساحة التخزين، ثم أعد المحاولة."
                                     subtitles = listOf(
@@ -149,9 +170,10 @@ fun VideoTranslatorApp() {
                                         status = "جاهز للمراجعة. عدّل أي سطر قبل التصدير، ثم اضغط تصدير."
                                     }
                                 }
-                            } catch (e: Exception) {
+                            } catch (e: Throwable) {
                                 status = "حدث خطأ: ${e.message}"
                             } finally {
+                                progress = null
                                 isWorking = false
                             }
                         }
@@ -160,7 +182,15 @@ fun VideoTranslatorApp() {
                 ) { Text("تفريغ وترجمة") }
 
                 if (isWorking) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    val p = progress
+                    if (p != null) {
+                        LinearProgressIndicator(
+                            progress = p,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
                 }
 
                 if (subtitles.isNotEmpty()) {
@@ -190,7 +220,8 @@ fun VideoTranslatorApp() {
                     Button(
                         onClick = {
                             isWorking = true
-                            status = "جارٍ تصدير الفيديو المدمج + ملف SRT..."
+                            progress = null
+                            status = "جارٍ دمج الترجمة في الفيديو... قد يأخذ وقتاً حسب طول الفيديو، لا تغلق التطبيق."
                             scope.launch {
                                 try {
                                     val input = File(context.cacheDir, "input_video.mp4")
@@ -198,13 +229,17 @@ fun VideoTranslatorApp() {
                                         VideoExporter.export(
                                             context, input, subtitles,
                                             File(context.getExternalFilesDir(null), "VideoTranslator")
-                                        ) { log -> status = log }
+                                        ) { log -> scope.launch { status = log } }
                                     }
                                     exportResult = result
                                     status = "تم التصدير بنجاح."
-                                } catch (e: Exception) {
+                                } catch (e: Throwable) {
+                                    // Throwable, not just Exception: a
+                                    // failure here must show a message,
+                                    // never silently close the app.
                                     status = "فشل التصدير: ${e.message}"
                                 } finally {
+                                    progress = null
                                     isWorking = false
                                 }
                             }
@@ -212,6 +247,30 @@ fun VideoTranslatorApp() {
                         enabled = !isWorking,
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("تصدير: فيديو مدمج + SRT") }
+
+                    Button(
+                        onClick = {
+                            isWorking = true
+                            status = "جارٍ حفظ ملف SRT فقط..."
+                            scope.launch {
+                                try {
+                                    val srt = withContext(Dispatchers.IO) {
+                                        VideoExporter.exportSrtOnly(
+                                            subtitles,
+                                            File(context.getExternalFilesDir(null), "VideoTranslator")
+                                        )
+                                    }
+                                    status = "تم حفظ ملف SRT فقط في: ${srt.parent}/${srt.name}. استخدمه إذا فشل الدمج على جهازك."
+                                } catch (e: Throwable) {
+                                    status = "فشل حفظ SRT: ${e.message}"
+                                } finally {
+                                    isWorking = false
+                                }
+                            }
+                        },
+                        enabled = !isWorking,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("تصدير SRT فقط (بدون دمج)") }
                 }
 
                 exportResult?.let { result ->

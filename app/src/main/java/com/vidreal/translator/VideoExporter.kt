@@ -14,10 +14,32 @@ import java.io.File
  *
  * Burning uses ffmpeg-kit with libass. The ASS file points at the
  * bundled Noto Naskh Arabic font, so Arabic letters join correctly.
+ *
+ * Crash-safety notes (added after a user-reported export crash):
+ *  - The FFmpeg command is passed via executeWithArguments, not as
+ *    one parsed string, so quotes/commas in the subtitle filter can
+ *    no longer break FFmpegKit's command parser and kill the app.
+ *  - Pre-checks fail with a readable message (missing video, empty
+ *    captions, missing font) instead of reaching FFmpeg at all.
+ *  - FFmpeg failure logs are truncated: the full log can be megabytes
+ *    and showing it all in the UI is itself a crash risk.
+ *  - [exportSrtOnly] never touches FFmpeg, so the user always has a
+ *    working SRT fallback even if burning fails on their device.
  */
 object VideoExporter {
 
     data class ExportResult(val videoFile: File, val srtFile: File)
+
+    fun exportSrtOnly(
+        subtitles: List<Subtitle>,
+        outputDir: File,
+    ): File {
+        require(subtitles.isNotEmpty()) { "لا توجد أسطر كابشن للتصدير." }
+        outputDir.mkdirs()
+        val srtFile = File(outputDir, "captions_ar.srt")
+        srtFile.writeText(SubtitleFormat.toSrt(subtitles))
+        return srtFile
+    }
 
     fun export(
         context: Context,
@@ -26,9 +48,12 @@ object VideoExporter {
         outputDir: File,
         onLog: (String) -> Unit = {},
     ): ExportResult {
-        outputDir.mkdirs()
-        val srtFile = File(outputDir, "captions_ar.srt")
-        srtFile.writeText(SubtitleFormat.toSrt(subtitles))
+        require(inputVideo.isFile && inputVideo.length() > 0) {
+            "ملف الفيديو غير موجود أو فارغ. أعد اختيار الفيديو ثم حاول التصدير من جديد."
+        }
+        require(subtitles.isNotEmpty()) { "لا توجد أسطر كابشن للتصدير." }
+
+        val srtFile = exportSrtOnly(subtitles, outputDir)
 
         val assFile = File(context.cacheDir, "captions_ar.ass")
         assFile.writeText(SubtitleFormat.toAss(subtitles))
@@ -37,21 +62,50 @@ object VideoExporter {
         fontDir.mkdirs()
         val fontFile = File(fontDir, "NotoNaskhArabic-Regular.ttf")
         if (!fontFile.exists()) {
-            context.assets.open("fonts/NotoNaskhArabic-Regular.ttf").use { input ->
-                fontFile.outputStream().use { output -> input.copyTo(output) }
+            try {
+                context.assets.open("fonts/NotoNaskhArabic-Regular.ttf").use { input ->
+                    fontFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            } catch (e: Exception) {
+                throw RuntimeException("خط العربية غير موجود في التطبيق، ولا يمكن دمج الترجمة بدونه.", e)
             }
         }
+        require(fontFile.length() > 0) { "خط العربية تالف أو فارغ في التطبيق." }
 
         val videoOut = File(outputDir, "video_with_arabic_subtitles.mp4")
         // fontsdir + force_style tells libass where the Arabic font is.
+        // Passed as one filter argument (no shell-style quoting), with
+        // an explicit encoder and the veryfast preset: the default
+        // medium preset re-encodes slowly on phones and is the most
+        // likely reason a long export was killed mid-way.
+        // The single quotes here are FFmpeg filter syntax (they protect
+        // the commas inside force_style), not shell quoting: with an
+        // argument array there is no shell to strip them.
         val filter = "subtitles='${assFile.absolutePath}':fontsdir='${fontDir.absolutePath}':force_style='FontName=Noto Naskh Arabic,FontSize=64,PrimaryColour=&HFFFFFF&,OutlineColour=&H80000000&,BorderStyle=1,Outline=3,Alignment=2,MarginV=140'"
-        val command = "-y -i \"${inputVideo.absolutePath}\" -vf \"$filter\" -c:a copy \"${videoOut.absolutePath}\""
-        onLog("Running ffmpeg: $command")
-        val session = FFmpegKit.execute(command)
+        val arguments = arrayOf(
+            "-y",
+            "-i", inputVideo.absolutePath,
+            "-vf", filter,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-c:a", "copy",
+            videoOut.absolutePath,
+        )
+        onLog("Running ffmpeg (veryfast preset)")
+        val session = FFmpegKit.executeWithArguments(arguments)
         val code = session.returnCode
         if (!ReturnCode.isSuccess(code)) {
-            val logs = session.allLogsAsString
-            throw RuntimeException("FFmpeg failed (code $code). Logs: $logs")
+            val logs = try {
+                session.allLogsAsString
+            } catch (e: Exception) {
+                "(could not read FFmpeg logs: ${e.message})"
+            }
+            val tail = if (logs.length > 2000) logs.takeLast(2000) else logs
+            throw RuntimeException("فشل دمج الترجمة (رمز $code). آخر سطور السجل:\n$tail")
+        }
+        require(videoOut.isFile && videoOut.length() > 0) {
+            "انتهى الدمج لكن ملف الفيديو الناتج غير موجود أو فارغ."
         }
         return ExportResult(videoOut, srtFile)
     }

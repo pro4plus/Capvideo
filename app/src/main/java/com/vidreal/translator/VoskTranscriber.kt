@@ -54,8 +54,18 @@ object VoskTranscriber {
      * Must be called off the main thread. Returns true when the model
      * is ready to transcribe with. A failed download cleans up the
      * partial model so the next attempt starts fresh.
+     *
+     * [onProgress] is called from the caller's thread with
+     * (downloadedBytes, totalBytes); totalBytes is -1 when the size
+     * is unknown, and both are -1 while the zip is being extracted,
+     * so the UI can always show where the download actually is
+     * instead of sitting silently for minutes.
      */
-    fun ensureModel(context: Context, lang: String): Boolean {
+    fun ensureModel(
+        context: Context,
+        lang: String,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): Boolean {
         if (isModelReady(context, lang)) return true
         val url = modelUrl(lang) ?: return false
         val dir = modelDir(context, lang)
@@ -63,12 +73,31 @@ object VoskTranscriber {
         try {
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", "VideoTranslator/1.1")
+            connection.setRequestProperty("User-Agent", "VideoTranslator/1.2")
             connection.connect()
             if (connection.responseCode !in 200..299) return false
+            val total = connection.contentLengthLong
+            var downloaded = 0L
+            var lastReported = -1L
             connection.inputStream.use { input ->
-                zipFile.outputStream().use { output -> input.copyTo(output) }
+                zipFile.outputStream().use { output ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        // Report at most every ~256 KB, plus at 100%.
+                        if (downloaded - lastReported >= 262144 || (total > 0 && downloaded >= total)) {
+                            lastReported = downloaded
+                            onProgress(downloaded, total)
+                        }
+                    }
+                }
             }
+            onProgress(downloaded, total)
+            // Extraction phase: no byte counter is meaningful here.
+            onProgress(-1, -1)
             if (dir.exists()) dir.deleteRecursively()
             dir.mkdirs()
             // The zip wraps everything in one top-level folder
