@@ -14,6 +14,10 @@
         android:label="مترجم الفيديو">
         android:supportsRtl="true"
         android:theme="@style/Theme.VideoTranslator">
+        <service
+            android:name=".ModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
