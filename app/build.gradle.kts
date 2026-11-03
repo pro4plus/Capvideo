@@ -12,8 +12,8 @@ android {
         applicationId = "com.vidreal.translator"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     buildTypes {
@@ -67,12 +67,14 @@ dependencies {
     // so no call sites change. 6.0.3 keeps the original FFmpeg 6.0 line.
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:6.0.3")
 
-    // Vosk offline speech recognition (optional AAR, see README section 3):
-    // Download vosk-android AAR from https://github.com/alphacep/vosk-android
-    // and put it in app/libs/, then uncomment the next line:
-    // implementation(files("libs/vosk-android.aar"))
-    // The code in VoskTranscriber loads Vosk by reflection, so the project
-    // still compiles without the AAR. Without it, the app offers manual
-    // caption entry and editing, and transcription after the AAR + model
-    // are added.
+    // Vosk offline speech recognition, from Maven Central (no local AAR
+    // needed). The AAR must be declared with @aar, otherwise Gradle
+    // resolves a plain jar without the native libvosk.so libraries.
+    // VoskTranscriber still loads org.vosk classes by reflection, so a
+    // missing library degrades to manual caption entry instead of a crash.
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    // The speech model itself is NOT bundled: VoskTranscriber downloads
+    // it in-app on first use (English ~40 MB, Arabic ~318 MB) into
+    // filesDir/models/<lang>/, then transcription works fully offline.
 }
