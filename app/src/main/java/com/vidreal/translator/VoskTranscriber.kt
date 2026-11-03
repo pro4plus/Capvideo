@@ -3,21 +3,24 @@ package com.vidreal.translator
 import android.content.Context
 import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.zip.ZipInputStream
 
 /**
  * Offline transcription with Vosk, loaded by reflection.
  *
- * Why reflection? The Vosk Android AAR is distributed from GitHub, not
- * Maven Central, so the project must still compile without it. When the
- * user adds app/libs/vosk-android.aar (see README) and downloads a model,
- * this class finds org.vosk.Model / org.vosk.Recognizer at runtime and
- * returns timed segments. Without them, transcribe() returns an empty
- * list and the UI falls back to manual caption entry.
+ * The Vosk library itself now comes from Maven Central
+ * (com.alphacephei:vosk-android), so no local AAR is needed. Reflection
+ * is kept so a missing library degrades to manual caption entry instead
+ * of a crash. The speech model is downloaded in-app on first use by
+ * [ensureModel] and stored under filesDir/models/<lang>/, so the user
+ * never has to copy files into the app's private folder by hand.
  *
- * Model downloads (small models, ~40-50 MB each):
- *  English: https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
- *  Arabic:  https://alphacephei.com/vosk/models/vosk-model-ar-mgb2-0.4.zip
- * Unzip into the app's filesDir/models/<lang>/ folder.
+ * Model downloads:
+ *  English: vosk-model-small-en-us-0.15.zip (~40 MB)
+ *  Arabic:  vosk-model-ar-mgb2-0.4.zip (~318 MB)
+ * Both from https://alphacephei.com/vosk/models/
  */
 object VoskTranscriber {
 
@@ -34,9 +37,75 @@ object VoskTranscriber {
     fun modelDir(context: Context, lang: String): File =
         File(context.filesDir, "models/$lang")
 
+    fun modelUrl(lang: String): String? = when (lang) {
+        "en" -> "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+        "ar" -> "https://alphacephei.com/vosk/models/vosk-model-ar-mgb2-0.4.zip"
+        else -> null
+    }
+
+    /** True when the extracted model (not just an empty folder) is present. */
+    fun isModelReady(context: Context, lang: String): Boolean {
+        val dir = modelDir(context, lang)
+        return dir.isDirectory && File(dir, "am/final.mdl").isFile
+    }
+
+    /**
+     * Download and extract the model for [lang] on first use.
+     * Must be called off the main thread. Returns true when the model
+     * is ready to transcribe with. A failed download cleans up the
+     * partial model so the next attempt starts fresh.
+     */
+    fun ensureModel(context: Context, lang: String): Boolean {
+        if (isModelReady(context, lang)) return true
+        val url = modelUrl(lang) ?: return false
+        val dir = modelDir(context, lang)
+        val zipFile = File(context.cacheDir, "vosk-model-$lang.zip")
+        try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", "VideoTranslator/1.1")
+            connection.connect()
+            if (connection.responseCode !in 200..299) return false
+            connection.inputStream.use { input ->
+                zipFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (dir.exists()) dir.deleteRecursively()
+            dir.mkdirs()
+            // The zip wraps everything in one top-level folder
+            // (vosk-model-.../); strip that first component so Vosk
+            // finds am/, conf/ and graph/ directly under models/<lang>/.
+            ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory) {
+                        val parts = entry.name.split("/").filter { it.isNotEmpty() }
+                        if (parts.size > 1) {
+                            val outFile = File(dir, parts.drop(1).joinToString("/"))
+                            val canonicalDir = dir.canonicalFile
+                            val canonicalOut = outFile.canonicalFile
+                            check(canonicalOut.path.startsWith(canonicalDir.path + File.separator)) {
+                                "Unsafe zip entry: ${entry.name}"
+                            }
+                            canonicalOut.parentFile?.mkdirs()
+                            canonicalOut.outputStream().use { out -> zip.copyTo(out) }
+                        }
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+            zipFile.delete()
+            return isModelReady(context, lang)
+        } catch (e: Exception) {
+            try { if (dir.exists()) dir.deleteRecursively() } catch (_: Exception) {}
+            try { if (zipFile.exists()) zipFile.delete() } catch (_: Exception) {}
+            return false
+        }
+    }
+
     fun transcribe(context: Context, wavFile: File, lang: String): List<Subtitle> {
         val modelDir = modelDir(context, lang)
-        if (!modelDir.exists() || !isAvailable()) return emptyList()
+        if (!isModelReady(context, lang) || !isAvailable()) return emptyList()
         return try {
             val modelClass = Class.forName("org.vosk.Model")
             val model = modelClass.getConstructor(String::class.java).newInstance(modelDir.absolutePath)
