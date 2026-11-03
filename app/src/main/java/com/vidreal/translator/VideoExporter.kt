@@ -76,15 +76,30 @@ object VideoExporter {
         // Official FFmpegKit requirement on Android, missing until now:
         // Android has no default fontconfig configuration, so libass
         // cannot find the Arabic font from the filter's fontsdir alone.
-        // Registering the font directory (with an explicit family ->
-        // file mapping) is what makes the subtitles filter find
-        // "Noto Naskh Arabic". A failure here must not abort the
-        // export by itself: the filter still has fontsdir as fallback.
+        // Registering the font directories is what makes the subtitles
+        // filter find "Noto Naskh Arabic".
+        //
+        // CRITICAL, learned from the 1.5 "boxes" bug: do NOT pass a
+        // font name map here. FFmpegKitConfig turns each map entry
+        // into a fontconfig <match> rule that rewrites the requested
+        // family to the map value. We used to map
+        // "Noto Naskh Arabic" -> "NotoNaskhArabic-Regular.ttf", but
+        // that value is a FILE name, not a family name, so fontconfig
+        // rewrote the request to a family that does not exist, libass
+        // fell back to a font without Arabic glyphs, and the burned
+        // subtitles came out as boxes (reproduced locally: the same
+        // ASS + font renders perfect Arabic without that rule, and
+        // fails font selection with it). With an empty map, fontconfig
+        // scans the registered directories and finds the real family
+        // "Noto Naskh Arabic" from the bundled TTF, whose family name
+        // was verified to be exactly that.
+        // A failure here must not abort the export by itself: the
+        // filter still has fontsdir as fallback.
         try {
             FFmpegKitConfig.setFontDirectoryList(
                 context,
                 listOf(fontDir.absolutePath, "/system/fonts"),
-                mapOf("Noto Naskh Arabic" to "NotoNaskhArabic-Regular.ttf"),
+                emptyMap(),
             )
         } catch (e: Exception) {
             onLog("Font directory registration failed: ${e.message}")
@@ -113,14 +128,33 @@ object VideoExporter {
         onLog("Running ffmpeg (veryfast preset)")
         val session = FFmpegKit.executeWithArguments(arguments)
         val code = session.returnCode
+        val allLogs = try {
+            session.allLogsAsString
+        } catch (e: Exception) {
+            "(could not read FFmpeg logs: ${e.message})"
+        }
+        // libass reports which font it actually used in "fontselect"
+        // lines. A wrong font is a silent success for FFmpeg (it still
+        // writes a video) but a visible failure for the user (boxes),
+        // so check it explicitly: if libass selected a font and it is
+        // not Noto Naskh Arabic, fail loudly with that line instead of
+        // delivering a boxes video as if it had worked.
+        val fontLines = allLogs.lines().filter { it.contains("fontselect") }
+        val wrongFont = fontLines.firstOrNull { line ->
+            line.contains("failed to find") ||
+                (line.contains("->") && !line.contains("NotoNaskh") && !line.contains("Noto Naskh"))
+        }
         if (!ReturnCode.isSuccess(code)) {
-            val logs = try {
-                session.allLogsAsString
-            } catch (e: Exception) {
-                "(could not read FFmpeg logs: ${e.message})"
-            }
-            val tail = if (logs.length > 2000) logs.takeLast(2000) else logs
-            throw RuntimeException("فشل دمج الترجمة (رمز $code). آخر سطور السجل:\n$tail")
+            val tail = if (allLogs.length > 2000) allLogs.takeLast(2000) else allLogs
+            val fontInfo = if (fontLines.isNotEmpty()) "\nسطور الخط:\n" + fontLines.joinToString("\n") else ""
+            throw RuntimeException("فشل دمج الترجمة (رمز $code). آخر سطور السجل:\n$tail$fontInfo")
+        }
+        if (wrongFont != null) {
+            throw RuntimeException(
+                "تم الدمج لكن بخط غير عربي، فستظهر الترجمة مربعات. " +
+                    "الخط المختار: $wrongFont. أعد المحاولة بعد حذف بيانات التطبيق، " +
+                    "أو أرسل هذه الرسالة للتشخيص."
+            )
         }
         require(videoOut.isFile && videoOut.length() > 0) {
             "انتهى الدمج لكن ملف الفيديو الناتج غير موجود أو فارغ."
