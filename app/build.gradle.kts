@@ -12,8 +12,8 @@ android {
         applicationId = "com.vidreal.translator"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.9"
+        versionCode = 11
+        versionName = "1.10"
     }
 
     // Fixed debug signing key, added in 1.5: every GitHub runner used to
