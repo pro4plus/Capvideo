@@ -18,8 +18,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # Do NOT use android-actions/setup-android: it failed on the runner
+      # with 'Failed to find package tools'. ubuntu-latest runners already
+      # ship a preinstalled Android SDK, so Gradle uses ANDROID_HOME as is.
+      - name: Check preinstalled Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME" || true
 
       - name: Download Arabic font (not stored in the repo)
         run: |
