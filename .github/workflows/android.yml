@@ -26,13 +26,17 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls "$ANDROID_HOME" || true
 
-      - name: Download Arabic font (not stored in the repo)
+      - name: Download Arabic fonts (not stored in the repo)
         run: |
           mkdir -p app/src/main/assets/fonts
           curl -L -o app/src/main/assets/fonts/NotoNaskhArabic-Regular.ttf \
             "https://github.com/notofonts/Noto-Fonts/raw/main/hinted/ttf/NotoNaskhArabic/NotoNaskhArabic-Regular.ttf" \
           || curl -L -o app/src/main/assets/fonts/NotoNaskhArabic-Regular.ttf \
             "https://github.com/google/fonts/raw/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf"
+          curl -L -o app/src/main/assets/fonts/NotoSansArabic-Regular.ttf \
+            "https://github.com/notofonts/Noto-Fonts/raw/main/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf"
+          curl -L -o app/src/main/assets/fonts/Amiri-Regular.ttf \
+            "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
           ls -lh app/src/main/assets/fonts/
 
       - name: Build debug APK
