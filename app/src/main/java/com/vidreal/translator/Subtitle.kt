@@ -62,6 +62,10 @@ object SubtitleFormat {
      * stored in logical order; libass renders it right-to-left.
      * Note: Noto Sans Arabic was tested and dropped a glyph for "ث" in
      * medial position under libass; Noto Naskh Arabic renders it correctly.
+     * 1.13: re-tested 2026-11-06 with two Sans file versions, bold and
+     * non-bold: still tofu boxes. Almarai and Tajawal fail the same way
+     * under libass. Only Naskh and Amiri are verified to render Arabic
+     * correctly when burned, so only those two are offered in the app.
      *
      * PlayRes must be the REAL video size (1.11 fix): libass scales every
      * script-unit size by video height / PlayResY. With the old fixed
@@ -119,7 +123,7 @@ object SubtitleFormat {
             ScriptType: v4.00+
             PlayResX: $playResX
             PlayResY: $playResY
-            WrapStyle: 2
+            WrapStyle: 0
             ScaledBorderAndShadow: yes
 
             [V4+ Styles]
@@ -183,14 +187,39 @@ object SubtitleFormat {
         return out.toString()
     }
 
-    /** Split a long recognised segment into readable lines, max ~42 chars. */
+    /**
+     * 1.13: give every line a minimum time on screen, so captions stop
+     * disappearing before they can be read. Vosk lines last only as
+     * long as the speech (a fast 6-word line can be ~1.5s), and with
+     * word-by-word the full line is only visible at the very end of
+     * that. Each line is stretched to at least ~90ms per character
+     * (2.2s minimum, 4.5s maximum), then clamped to 80ms before the
+     * next line starts so lines never overlap. Word timings are left
+     * alone on purpose: words still pop in as spoken, then the whole
+     * line stays readable until the stretched end. Applied after
+     * transcription/translation, so preview and export share it.
+     */
+    fun normalizeTimings(subtitles: List<Subtitle>): List<Subtitle> {
+        if (subtitles.isEmpty()) return subtitles
+        val sorted = subtitles.sortedBy { it.startMs }
+        return sorted.mapIndexed { i, sub ->
+            val target = (sub.text.length * 90L).coerceIn(2200L, 4500L)
+            var end = maxOf(sub.endMs, sub.startMs + target)
+            val nextStart = sorted.getOrNull(i + 1)?.startMs
+            if (nextStart != null) end = minOf(end, nextStart - 80L)
+            if (end <= sub.startMs + 300L) end = sub.endMs
+            sub.copy(endMs = end)
+        }
+    }
+
+    /** Split a long recognised segment into readable lines, max ~32 chars. */
     fun splitLong(text: String, startMs: Long, endMs: Long, original: String, lang: String): List<Subtitle> {
         val words = text.trim().split(Regex("\\s+"))
-        if (text.length <= 42) return listOf(Subtitle(startMs, endMs, text, original, lang))
+        if (text.length <= 32) return listOf(Subtitle(startMs, endMs, text, original, lang))
         val lines = mutableListOf<String>()
         var current = StringBuilder()
         for (word in words) {
-            if (current.length + word.length + 1 > 42 && current.isNotEmpty()) {
+            if (current.length + word.length + 1 > 32 && current.isNotEmpty()) {
                 lines.add(current.toString().trim())
                 current = StringBuilder()
             }

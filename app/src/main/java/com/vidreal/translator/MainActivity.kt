@@ -23,6 +23,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -60,6 +71,11 @@ fun CapeoApp() {
     val scope = rememberCoroutineScope()
 
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
+    // 1.13: real video size, read when a video is picked. The preview
+    // scales its caption from it, so the preview shows the caption
+    // exactly as libass will burn it (same size relative to the video).
+    var videoWidth by remember { mutableStateOf(1080) }
+    var videoHeight by remember { mutableStateOf(1920) }
     var previewUri by remember { mutableStateOf<Uri?>(null) }
     var previewIsExported by remember { mutableStateOf(false) }
     var videoView by remember { mutableStateOf<VideoView?>(null) }
@@ -101,6 +117,15 @@ fun CapeoApp() {
         selectedIndex = null
         activeTool = "transcribe"
         status = if (uri != null) "تم اختيار الفيديو. انتقل إلى التفريغ" else "لم يتم اختيار فيديو"
+        if (uri != null) {
+            scope.launch {
+                val (w, h) = withContext(Dispatchers.IO) {
+                    VideoExporter.displaySize(context, uri)
+                }
+                videoWidth = w
+                videoHeight = h
+            }
+        }
     }
 
     fun shareExported() {
@@ -195,7 +220,10 @@ fun CapeoApp() {
                         stage = "الترجمة إلى العربية"
                         status = "تم التفريغ. جارٍ الترجمة إلى العربية..."
                         val translated = if (lang == "ar") found else Translator.translateToArabic(found)
-                        subtitles = translated
+                        // 1.13: stretch every line to a readable minimum
+                        // duration (see SubtitleFormat.normalizeTimings),
+                        // so captions stop vanishing before they can be read.
+                        subtitles = SubtitleFormat.normalizeTimings(translated)
                         stage = null
                         status = "جاهز. عدّل النص والتنسيق في الأسفل، وشاهد المعاينة، ثم صدّر."
                         activeTool = "text"
@@ -292,9 +320,24 @@ fun CapeoApp() {
             // 240dp in 1.10: the preview kept squeezing the settings
             // panel into a thin strip. Shrinking it, plus moving the
             // tools to a bottom icon bar, gives the panel real room.
-            Box(
+            // 1.13: the caption is drawn at TRUE scale. The old code
+            // used size * 0.75sp across the whole container width, so
+            // on a small portrait preview a size-100 caption was ~75sp
+            // of text over a ~135dp-wide video: it spilled out of the
+            // video and looked nothing like the saved video. Now the
+            // overlay sits exactly on the displayed video rectangle
+            // (VideoView letterboxes the same way), and the font is
+            // size * (displayed width / real video width) sp, which is
+            // the same fraction of the video width that libass burns
+            // in. Preview and export finally agree.
+            BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().height(240.dp).background(Color.Black)
             ) {
+                val aspect = videoWidth.toFloat() / videoHeight.toFloat()
+                val displayW = if (maxWidth / maxHeight > aspect) maxHeight * aspect else maxWidth
+                val displayH = if (maxWidth / maxHeight > aspect) maxHeight else maxWidth / aspect
+                val previewScale = displayW.value / videoWidth.toFloat()
+                val density = LocalDensity.current.density
                 if (previewUri != null) {
                     AndroidView(
                         factory = { ctx ->
@@ -346,10 +389,26 @@ fun CapeoApp() {
                             ws.indexOfFirst { positionMs in it.startMs..it.endMs }.takeIf { it >= 0 }
                                 ?: ws.indexOfLast { it.endMs <= positionMs }.takeIf { it >= 0 }
                         } else null
+                        // Overlay constrained to the displayed video
+                        // rectangle, with the same side margins (80
+                        // script px) and bottom/top margin as the ASS
+                        // style, scaled the same way as the font.
                         Box(
-                            modifier = Modifier.align(overlayAlign).padding(16.dp).fillMaxWidth(),
-                            contentAlignment = Alignment.Center
+                            modifier = Modifier.align(Alignment.Center).size(displayW, displayH)
                         ) {
+                            Box(
+                                modifier = Modifier.align(overlayAlign).fillMaxWidth().padding(
+                                    start = (80 * previewScale).dp,
+                                    end = (80 * previewScale).dp,
+                                    top = if (style.position == CaptionPosition.TOP)
+                                        (SubtitleFormat.scaledMarginV(style, videoHeight) * previewScale).dp
+                                    else 0.dp,
+                                    bottom = if (style.position == CaptionPosition.BOTTOM)
+                                        (SubtitleFormat.scaledMarginV(style, videoHeight) * previewScale).dp
+                                    else 0.dp,
+                                ),
+                                contentAlignment = Alignment.Center
+                            ) {
                             key(style, currentSubtitle!!.text, wordIndex) {
                                 AndroidView(
                                     factory = { ctx ->
@@ -362,24 +421,30 @@ fun CapeoApp() {
                                                 )
                                             } catch (_: Exception) {
                                             }
-                                            // 0.75x in 1.10 (was 0.5x): the old
-                                            // scale halved every size, so a
-                                            // size-64 caption read as only
-                                            // 32sp and enlarging it still
-                                            // looked small. 0.75x keeps the
-                                            // preview honestly large.
-                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.size * 0.75f)
+                                            // 1.13: true scale (see the preview
+                                            // comment above): size in script
+                                            // pixels times displayed-width /
+                                            // real-width, so the preview font
+                                            // is the same fraction of the video
+                                            // width as the burned-in font.
+                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.size * previewScale)
                                             setTextColor(android.graphics.Color.parseColor("#" + style.color.rgb))
-                                            setShadowLayer(8f, 0f, 0f, android.graphics.Color.BLACK)
+                                            setShadowLayer(8f * previewScale * density, 0f, 0f, android.graphics.Color.BLACK)
                                             setBackgroundColor(
                                                 if (style.background == CaptionBackground.BOX)
                                                     android.graphics.Color.parseColor("#80000000")
                                                 else android.graphics.Color.TRANSPARENT
                                             )
-                                            setPadding(16, 8, 16, 8)
+                                            setPadding(
+                                                (8 * previewScale * density).toInt(),
+                                                (4 * previewScale * density).toInt(),
+                                                (8 * previewScale * density).toInt(),
+                                                (4 * previewScale * density).toInt()
+                                            )
                                         }
                                     }
                                 )
+                            }
                             }
                         }
                     }
@@ -393,7 +458,12 @@ fun CapeoApp() {
                                 onClick = { picker.launch("video/*") },
                                 modifier = Modifier.height(56.dp).padding(horizontal = 24.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
-                            ) { Text("📁  اختر فيديو من جوالك", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                                    Text("اختر فيديو من جوالك", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }
@@ -414,7 +484,12 @@ fun CapeoApp() {
                             }
                         },
                         enabled = previewUri != null
-                    ) { Text(if (isPlaying) "⏸" else "▶") }
+                    ) {
+                        Icon(
+                            if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = if (isPlaying) "إيقاف" else "تشغيل"
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Slider(
                         value = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
@@ -490,7 +565,10 @@ fun CapeoApp() {
                             modifier = Modifier.fillMaxWidth().height(56.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
                         ) {
-                            Text("📁  اختر فيديو من جوالك", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                                Text("اختر فيديو من جوالك", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                         if (pickedUri != null) Text("تم اختيار فيديو. انتقل إلى التفريغ.", color = Color(0xFFAAAAAA), fontSize = 15.sp)
                         if (detectedLang.isNotEmpty()) Text("اللغة المكتشفة: $detectedLang", color = Color.White)
@@ -628,7 +706,11 @@ fun CapeoApp() {
                                                 )
                                             } catch (_: Exception) {
                                             }
-                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, style.size * 0.75f)
+                                            // 1.13: the panel sample is not the video,
+                                            // so it must not use the video scale: cap
+                                            // it, otherwise a size-100 style shows a
+                                            // 75sp sample that fills the whole panel.
+                                            setTextSize(TypedValue.COMPLEX_UNIT_SP, (style.size * 0.35f).coerceAtMost(32f))
                                             setTextColor(android.graphics.Color.parseColor("#" + style.color.rgb))
                                             setShadowLayer(8f, 0f, 0f, android.graphics.Color.BLACK)
                                         }
@@ -725,7 +807,12 @@ fun CapeoApp() {
                             enabled = subtitles.isNotEmpty() && !isWorking,
                             modifier = Modifier.fillMaxWidth().height(56.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
-                        ) { Text("🎬  تصدير فيديو + SRT", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Filled.Download, contentDescription = null)
+                                Text("تصدير فيديو + SRT", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                         if (exportResult != null) {
                             Text("تم الحفظ:", color = Color.White)
                             Text("الفيديو: ${exportResult!!.videoFile.name}", color = Color(0xFFAAAAAA), fontSize = 15.sp)
@@ -749,18 +836,20 @@ fun CapeoApp() {
             // replaces both the middle tools bar and the fixed bottom
             // export bar, so the settings panel above gets all the
             // middle space instead of a squeezed strip.
+            // 1.13: vector icons (Material) instead of phone emoji.
+            // Emoji render differently on every phone and look
+            // unprofessional; vector icons are identical everywhere.
             val tools = listOf(
-                "video" to "🎬" to "فيديو",
-                "transcribe" to "🎙️" to "تفريغ",
-                "text" to "✍️" to "نص",
-                "subtitles" to "📝" to "ترجمات",
-                "share" to "📤" to "مشاركة",
+                Triple("video", Icons.Filled.Movie, "فيديو"),
+                Triple("transcribe", Icons.Filled.Mic, "تفريغ"),
+                Triple("text", Icons.Filled.Edit, "نص"),
+                Triple("subtitles", Icons.Filled.Description, "ترجمات"),
+                Triple("share", Icons.Filled.Share, "مشاركة"),
             )
             Row(
                 modifier = Modifier.fillMaxWidth().background(Color(0xFF111111)).padding(vertical = 6.dp),
             ) {
-                tools.forEach { (tool, label) ->
-                    val (id, icon) = tool
+                tools.forEach { (id, icon, label) ->
                     val selected = activeTool == id
                     Column(
                         modifier = Modifier
@@ -772,7 +861,11 @@ fun CapeoApp() {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Text(icon, fontSize = 24.sp)
+                        Icon(
+                            icon, contentDescription = label,
+                            modifier = Modifier.size(24.dp),
+                            tint = if (selected) Color(0xFFC4B5FD) else Color(0xFFAAAAAA)
+                        )
                         Text(
                             label,
                             color = if (selected) Color(0xFFC4B5FD) else Color(0xFFAAAAAA),

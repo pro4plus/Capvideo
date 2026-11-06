@@ -235,9 +235,11 @@ object VoskTranscriber {
             val result = obj.optJSONArray("result") ?: return out
             // Keep every word with its own timing: that is what the
             // Captions-AI word-by-word reveal needs. Group words into
-            // segments: break on a pause longer than 0.5s or after 8
+            // segments: break on a pause longer than 0.5s or after 6
             // words, so captions stay readable, then split any segment
-            // longer than ~42 characters into word chunks.
+            // longer than ~32 characters into word chunks.
+            // 1.13: 42 chars / 8 words made lines too wide for the
+            // frame at large sizes, so they spilled out of the video.
             val allWords = mutableListOf<Word>()
             for (i in 0 until result.length()) {
                 val w = result.getJSONObject(i)
@@ -268,7 +270,7 @@ object VoskTranscriber {
                     len = 0
                 }
                 for (w in current) {
-                    if (chunk.isNotEmpty() && len + w.text.length + 1 > 42) emitChunk()
+                    if (chunk.isNotEmpty() && len + w.text.length + 1 > 32) emitChunk()
                     chunk += w
                     len += w.text.length + 1
                 }
@@ -276,7 +278,7 @@ object VoskTranscriber {
                 current = mutableListOf()
             }
             for (w in allWords) {
-                if (current.isNotEmpty() && (w.startMs - prevEnd > 500 || current.size >= 8)) {
+                if (current.isNotEmpty() && (w.startMs - prevEnd > 500 || current.size >= 6)) {
                     flush()
                 }
                 current += w
