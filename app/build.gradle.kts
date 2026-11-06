@@ -69,7 +69,11 @@ dependencies {
     // Material vector icons for the bottom bar and buttons (1.13):
     // the user asked to stop using phone emoji for the app icons.
     // Vector icons render the same on every device, unlike emoji.
-    implementation("androidx.compose.material:material-icons-core")
+    // Must be -extended, not -core: the first 1.13 build failed
+    // because core does NOT contain Movie, Mic, Pause, Download,
+    // FolderOpen or Description (only Edit, PlayArrow and Share
+    // resolved from core). Extended contains all of them.
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.foundation:foundation-layout")
     implementation("androidx.activity:activity-compose:1.9.0")
