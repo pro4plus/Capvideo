@@ -35,6 +35,24 @@ enum class CaptionBackground(val displayName: String, val assBorderStyle: Int) {
     BOX("صندوق شفاف", 3),
 }
 
+/**
+ * Caption presets, from the public Captions feature page studied in
+ * Clean Room with craft-anything (see captions-clean-room-study-v1.12.md):
+ * "Choose from styles like animated word-by-word captions, highlights or
+ * bold stacks. Or, build your own style to match custom fonts and colors."
+ * Each preset is one tap that sets font, colour, background and timing
+ * mode together; the user can still tweak every control afterwards.
+ * Preset names are generic style types, not Captions' trademarked
+ * template names (Cove, Energy, ...), and no Captions font or asset
+ * is used: Capeo keeps its own bundled Arabic fonts.
+ */
+enum class CaptionPreset(val displayName: String, val description: String) {
+    SPOTLIGHT("Spotlight", "كلمة بكلمة، الكلمة الحالية صفراء والباقي أبيض."),
+    IMPACT("Impact", "صندوق أسود وأحرف كبيرة، للعناوين القوية."),
+    KARAOKE("Karaoke", "السطر كاملاً ظاهر، والكلمات تُضاء مع الصوت."),
+    MINIMAL("Minimal", "سطر كامل هادئ بلا تأثيرات."),
+}
+
 data class CaptionStyle(
     val font: CaptionFont = CaptionFonts.NASKH,
     /** Font size in script pixels, as used by libass (64 = old default). */
@@ -45,7 +63,42 @@ data class CaptionStyle(
     /** Captions-AI mode: words appear one by one as spoken, with the
      *  current word highlighted. When false, whole lines appear at once. */
     val wordByWord: Boolean = true,
+    /** The preset these settings came from; manual tweaks keep it as
+     *  a starting point, they do not clear it. */
+    val preset: CaptionPreset = CaptionPreset.SPOTLIGHT,
+    /** IMPACT: render the caption in upper case (Latin letters only;
+     *  Arabic has no case, so Arabic text is unchanged). */
+    val uppercase: Boolean = false,
+    /** KARAOKE: one dialogue per line with ASS \k tags, so the whole
+     *  line is visible and words light up as they are spoken, instead
+     *  of popping in one by one. */
+    val karaoke: Boolean = false,
 ) {
+    /** One tap: return the style this preset stands for. Size and
+     *  position are left as the user set them, so applying a preset
+     *  never jumps the font size or moves the caption. */
+    fun withPreset(preset: CaptionPreset): CaptionStyle = when (preset) {
+        CaptionPreset.SPOTLIGHT -> copy(
+            preset = preset, font = CaptionFonts.SANS,
+            color = CaptionColors.YELLOW, background = CaptionBackground.OUTLINE,
+            wordByWord = true, uppercase = false, karaoke = false,
+        )
+        CaptionPreset.IMPACT -> copy(
+            preset = preset, font = CaptionFonts.SANS,
+            color = CaptionColors.YELLOW, background = CaptionBackground.BOX,
+            wordByWord = true, uppercase = true, karaoke = false,
+        )
+        CaptionPreset.KARAOKE -> copy(
+            preset = preset, font = CaptionFonts.SANS,
+            color = CaptionColors.YELLOW, background = CaptionBackground.OUTLINE,
+            wordByWord = true, uppercase = false, karaoke = true,
+        )
+        CaptionPreset.MINIMAL -> copy(
+            preset = preset, font = CaptionFonts.NASKH,
+            color = CaptionColors.WHITE, background = CaptionBackground.OUTLINE,
+            wordByWord = false, uppercase = false, karaoke = false,
+        )
+    }
     /** ASS colour in &HAABBGGRR form (alpha 00 = opaque). */
     fun assColor(): String {
         val r = rgbPart(0)

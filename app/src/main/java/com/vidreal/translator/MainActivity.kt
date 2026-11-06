@@ -544,22 +544,47 @@ fun CapeoApp() {
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text("تنسيق النص", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
-                        // Captions-AI preset: word-by-word reveal,
-                        // bold sans, yellow highlight, bottom position.
-                        Button(
-                            onClick = {
-                                style = style.copy(
-                                    wordByWord = true,
-                                    font = CaptionFonts.SANS,
-                                    color = CaptionColors.YELLOW,
-                                    position = CaptionPosition.BOTTOM,
-                                    background = CaptionBackground.OUTLINE,
-                                    size = 100,
-                                )
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
-                        ) { Text("✨ تطبيق نمط Captions AI", color = Color.Black, fontWeight = FontWeight.Bold) }
+                        // Caption presets, studied in Clean Room from
+                        // Captions' public feature page with
+                        // craft-anything: word-by-word, highlights,
+                        // bold stacks and minimal. One tap sets font,
+                        // colour, background and timing together.
+                        Text("أنماط الكابشن (مثل Captions)", color = Color.White, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CaptionPreset.values().take(2).forEach { preset ->
+                                Button(
+                                    onClick = { style = style.withPreset(preset) },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (style.preset == preset) Color(0xFFFFB300) else Color(0xFF2A2A2A)
+                                    )
+                                ) {
+                                    Text(
+                                        preset.displayName,
+                                        color = if (style.preset == preset) Color.Black else Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CaptionPreset.values().drop(2).forEach { preset ->
+                                Button(
+                                    onClick = { style = style.withPreset(preset) },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (style.preset == preset) Color(0xFFFFB300) else Color(0xFF2A2A2A)
+                                    )
+                                ) {
+                                    Text(
+                                        preset.displayName,
+                                        color = if (style.preset == preset) Color.Black else Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+                        Text(style.preset.description, color = Color(0xFFAAAAAA), fontSize = 15.sp)
                         Text("نمط الكابشن", color = Color.White, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
@@ -774,16 +799,30 @@ private fun captionsPreviewText(
     wordIndex: Int?,
     style: CaptionStyle,
 ): CharSequence {
+    val shownText = if (style.uppercase) sub.text.uppercase() else sub.text
     if (!style.wordByWord || sub.words.isEmpty() || wordIndex == null) {
-        return sub.text
+        return shownText
     }
     val highlightRgb = if (style.color.rgb == "FFFFFF") "FFFF00" else style.color.rgb
     val builder = android.text.SpannableStringBuilder()
-    sub.words.take(wordIndex + 1).forEachIndexed { i, word ->
+    // Karaoke preview must match the karaoke export: the whole line
+    // is visible, words already spoken are lit in the highlight
+    // colour, words not yet spoken stay white. Other presets pop
+    // words in one by one, so only spoken words are shown.
+    val words = if (style.karaoke) {
+        sub.words.map { it.copy(text = if (style.uppercase) it.text.uppercase() else it.text) }
+    } else {
+        sub.words.take(wordIndex + 1).map { it.copy(text = if (style.uppercase) it.text.uppercase() else it.text) }
+    }
+    words.forEachIndexed { i, word ->
         if (i > 0) builder.append(" ")
         val start = builder.length
         builder.append(word.text)
-        val colour = if (i == wordIndex) highlightRgb else "FFFFFF"
+        val colour = if (style.karaoke) {
+            if (i <= wordIndex) highlightRgb else "FFFFFF"
+        } else {
+            if (i == wordIndex) highlightRgb else "FFFFFF"
+        }
         builder.setSpan(
             android.text.style.ForegroundColorSpan(
                 android.graphics.Color.parseColor("#$colour")
