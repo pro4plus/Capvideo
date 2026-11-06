@@ -107,6 +107,12 @@ object SubtitleFormat {
         val highlightColour = if (style.wordByWord) {
             if (style.color.rgb == "FFFFFF") "&H0000FFFF" else style.assColor()
         } else style.assColor()
+        // Karaoke uses the ASS karaoke colours the other way round:
+        // PrimaryColour is the already-sung part, SecondaryColour the
+        // not-yet-sung part, so the line starts white and lights up
+        // word by word as the \k timers pass.
+        val primaryColour = if (style.karaoke) highlightColour else baseColour
+        val secondaryColour = if (style.karaoke) baseColour else "&H000000FF"
         val backColour = "&H80000000"
         val header = """
             [Script Info]
@@ -118,22 +124,43 @@ object SubtitleFormat {
 
             [V4+ Styles]
             Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-            Style: Arabic, ${style.font.familyName}, ${style.size}, $baseColour, &H000000FF, &H80000000, $backColour, -1, 0, 0, 0, 100, 100, 0, 0, ${style.background.assBorderStyle}, 3, 0, ${style.position.assAlignment}, 80, 80, ${scaledMarginV(style, playResY)}, 1
+            Style: Arabic, ${style.font.familyName}, ${style.size}, $primaryColour, $secondaryColour, &H80000000, $backColour, -1, 0, 0, 0, 100, 100, 0, 0, ${style.background.assBorderStyle}, 3, 0, ${style.position.assAlignment}, 80, 80, ${scaledMarginV(style, playResY)}, 1
 
             [Events]
             Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         """.trimIndent()
         val out = StringBuilder(header).append("\n")
         subtitles.sortedBy { it.startMs }.forEach { sub ->
-            if (style.wordByWord && sub.words.isNotEmpty()) {
+            if (style.karaoke && sub.words.isNotEmpty()) {
+                // Karaoke: one dialogue for the whole line. Each word
+                // carries a \k tag with its duration in centiseconds,
+                // so libass lights words up as they are spoken while
+                // the full line stays visible. Uppercase (IMPACT never
+                // sets karaoke, but a manual combination could) is
+                // applied to the words too.
+                val words = if (style.uppercase) {
+                    sub.words.map { it.copy(text = it.text.uppercase()) }
+                } else sub.words
+                val text = words.joinToString(" ") { word ->
+                    val durCs = ((word.endMs - word.startMs) / 10).coerceAtLeast(1L)
+                    "{\\k$durCs}${word.text}"
+                }
+                out.append("Dialogue: 0,")
+                    .append(assTime(sub.startMs)).append(",")
+                    .append(assTime(sub.endMs)).append(",Arabic,,0,0,0,,")
+                    .append(text.trim()).append("\n")
+            } else if (style.wordByWord && sub.words.isNotEmpty()) {
                 // Captions-AI reveal: one dialogue per word, showing
                 // all words spoken so far, with the newest word in
                 // the highlight colour. Each dialogue lasts until the
                 // next word starts, so words pop in as they are spoken.
-                sub.words.forEachIndexed { i, word ->
+                val words = if (style.uppercase) {
+                    sub.words.map { it.copy(text = it.text.uppercase()) }
+                } else sub.words
+                words.forEachIndexed { i, word ->
                     val start = word.startMs
-                    val end = if (i + 1 < sub.words.size) sub.words[i + 1].startMs else sub.endMs
-                    val before = sub.words.take(i).joinToString(" ") { it.text }
+                    val end = if (i + 1 < words.size) words[i + 1].startMs else sub.endMs
+                    val before = words.take(i).joinToString(" ") { it.text }
                     val text = if (before.isEmpty()) {
                         "{\\c$highlightColour&}${word.text}"
                     } else {
@@ -145,7 +172,8 @@ object SubtitleFormat {
                         .append(text.trim()).append("\n")
                 }
             } else {
-                val safe = sub.text.trim().replace("\n", "\\N")
+                val shown = if (style.uppercase) sub.text.uppercase() else sub.text
+                val safe = shown.trim().replace("\n", "\\N")
                 out.append("Dialogue: 0,")
                     .append(assTime(sub.startMs)).append(",")
                     .append(assTime(sub.endMs)).append(",Arabic,,0,0,0,,")
