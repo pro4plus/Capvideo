@@ -12,8 +12,8 @@ android {
         applicationId = "com.vidreal.translator"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.12"
+        versionCode = 14
+        versionName = "1.13"
     }
 
     // Fixed debug signing key, added in 1.5: every GitHub runner used to
@@ -66,6 +66,10 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    // Material vector icons for the bottom bar and buttons (1.13):
+    // the user asked to stop using phone emoji for the app icons.
+    // Vector icons render the same on every device, unlike emoji.
+    implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.foundation:foundation-layout")
     implementation("androidx.activity:activity-compose:1.9.0")

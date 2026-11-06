@@ -78,18 +78,24 @@ data class CaptionStyle(
      *  position are left as the user set them, so applying a preset
      *  never jumps the font size or moves the caption. */
     fun withPreset(preset: CaptionPreset): CaptionStyle = when (preset) {
+        // 1.13: presets use NASKH, not SANS. Noto Sans Arabic was
+        // verified twice (Nov 3 and Nov 6, two file versions, bold and
+        // non-bold) to drop Arabic glyphs as tofu boxes under libass,
+        // and the 1.12 presets using it made every preset export fail
+        // the font check. Naskh bold is the safe Arabic look; Amiri is
+        // the second verified font, selectable in the font picker.
         CaptionPreset.SPOTLIGHT -> copy(
-            preset = preset, font = CaptionFonts.SANS,
+            preset = preset, font = CaptionFonts.NASKH,
             color = CaptionColors.YELLOW, background = CaptionBackground.OUTLINE,
             wordByWord = true, uppercase = false, karaoke = false,
         )
         CaptionPreset.IMPACT -> copy(
-            preset = preset, font = CaptionFonts.SANS,
+            preset = preset, font = CaptionFonts.NASKH,
             color = CaptionColors.YELLOW, background = CaptionBackground.BOX,
             wordByWord = true, uppercase = true, karaoke = false,
         )
         CaptionPreset.KARAOKE -> copy(
-            preset = preset, font = CaptionFonts.SANS,
+            preset = preset, font = CaptionFonts.NASKH,
             color = CaptionColors.YELLOW, background = CaptionBackground.OUTLINE,
             wordByWord = true, uppercase = false, karaoke = true,
         )
@@ -119,9 +125,15 @@ data class CaptionStyle(
 
 object CaptionFonts {
     val NASKH = CaptionFont("naskh", "نسخ", "Noto Naskh Arabic", "NotoNaskhArabic-Regular.ttf")
-    val SANS = CaptionFont("sans", "سانس", "Noto Sans Arabic", "NotoSansArabic-Regular.ttf")
     val AMIRI = CaptionFont("amiri", "أميري", "Amiri", "Amiri-Regular.ttf")
-    val ALL = listOf(NASKH, SANS, AMIRI)
+    // 1.13: SANS was removed from the picker on purpose. Noto Sans
+    // Arabic renders fine in Android's preview but drops Arabic glyphs
+    // as tofu boxes when libass burns it into the video (verified
+    // twice locally, and Almarai/Tajawal fail the same way). Offering
+    // it meant preview and export disagreed. Only fonts verified to
+    // render Arabic correctly under libass are offered: Naskh and
+    // Amiri (Amiri verified 2026-11-06, frame test_Amiri_frame7s.png).
+    val ALL = listOf(NASKH, AMIRI)
 }
 
 object CaptionColors {

@@ -2,6 +2,7 @@ package com.vidreal.translator
 
 import android.content.Context
 import android.media.MediaMetadataRetriever
+import android.net.Uri
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
@@ -55,17 +56,37 @@ object VideoExporter {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(inputVideo.absolutePath)
-            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
-            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-            if (w == null || h == null || w <= 0 || h <= 0) fallback
-            else if (rotation == 90 || rotation == 270) h to w
-            else w to h
+            readDimensions(retriever, fallback)
         } catch (_: Exception) {
             fallback
         } finally {
             try { retriever.release() } catch (_: Exception) { }
         }
+    }
+
+    /** Same as [readVideoDimensions] but for a content Uri, so the
+     *  preview can scale its caption to the real video size (1.13).
+     *  Rotation is honoured the same way; any failure falls back to
+     *  1080x1920. */
+    fun displaySize(context: Context, uri: Uri): Pair<Int, Int> {
+        val fallback = 1080 to 1920
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            readDimensions(retriever, fallback)
+        } catch (_: Exception) {
+            fallback
+        } finally {
+            try { retriever.release() } catch (_: Exception) { }
+        }
+    }
+
+    private fun readDimensions(retriever: MediaMetadataRetriever, fallback: Pair<Int, Int>): Pair<Int, Int> {
+        val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+        val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+        val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        if (w == null || h == null || w <= 0 || h <= 0) return fallback
+        return if (rotation == 90 || rotation == 270) h to w else w to h
     }
 
     fun export(
@@ -179,12 +200,21 @@ object VideoExporter {
         // lines. A wrong font is a silent success for FFmpeg (it still
         // writes a video) but a visible failure for the user (boxes),
         // so check it explicitly: if libass selected a font and it is
-        // not Noto Naskh Arabic, fail loudly with that line instead of
-        // delivering a boxes video as if it had worked.
+        // not one of the bundled Arabic fonts, fail loudly with that
+        // line instead of delivering a boxes video as if it had worked.
+        // 1.13: this used to hardcode Noto Naskh Arabic, so choosing
+        // any other font (or a preset that used Sans) always failed
+        // export with a confusing message even when libass had found
+        // the right font. Now it accepts any bundled family.
+        val acceptedFamilies = CaptionFonts.ALL.map {
+            it.familyName.replace(" ", "").lowercase()
+        }
         val fontLines = allLogs.lines().filter { it.contains("fontselect") }
         val wrongFont = fontLines.firstOrNull { line ->
             line.contains("failed to find") ||
-                (line.contains("->") && !line.contains("NotoNaskh") && !line.contains("Noto Naskh"))
+                (line.contains("->") && acceptedFamilies.none { fam ->
+                    line.replace(" ", "").lowercase().contains(fam)
+                })
         }
         if (!ReturnCode.isSuccess(code)) {
             val tail = if (allLogs.length > 2000) allLogs.takeLast(2000) else allLogs
