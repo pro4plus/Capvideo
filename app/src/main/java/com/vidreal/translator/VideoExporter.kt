@@ -1,6 +1,7 @@
 package com.vidreal.translator
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.ReturnCode
@@ -42,6 +43,31 @@ object VideoExporter {
         return srtFile
     }
 
+    /**
+     * Real display size of the input video, for the ASS PlayRes (1.11).
+     * Rotation is honoured: a 1080x1920 file stored rotated 90 degrees
+     * displays as 1920x1080. Any failure falls back to the old 1080x1920,
+     * so export never breaks on an unreadable header — it just behaves
+     * exactly as 1.10 did.
+     */
+    private fun readVideoDimensions(inputVideo: File): Pair<Int, Int> {
+        val fallback = 1080 to 1920
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(inputVideo.absolutePath)
+            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            if (w == null || h == null || w <= 0 || h <= 0) fallback
+            else if (rotation == 90 || rotation == 270) h to w
+            else w to h
+        } catch (_: Exception) {
+            fallback
+        } finally {
+            try { retriever.release() } catch (_: Exception) { }
+        }
+    }
+
     fun export(
         context: Context,
         inputVideo: File,
@@ -57,8 +83,13 @@ object VideoExporter {
 
         val srtFile = exportSrtOnly(subtitles, outputDir)
 
+        // 1.11: write the real video size into the ASS PlayRes instead of
+        // the old fixed 1080x1920, so libass no longer shrinks the font
+        // on horizontal video (see SubtitleFormat.toAss).
+        val (playResX, playResY) = readVideoDimensions(inputVideo)
+        onLog("Video size ${playResX}x${playResY} — subtitles sized for it")
         val assFile = File(context.cacheDir, "captions_ar.ass")
-        assFile.writeText(SubtitleFormat.toAss(subtitles, style))
+        assFile.writeText(SubtitleFormat.toAss(subtitles, style, playResX, playResY))
 
         val fontDir = File(context.cacheDir, "fonts")
         fontDir.mkdirs()
@@ -122,7 +153,10 @@ object VideoExporter {
         // The single quotes here are FFmpeg filter syntax (they protect
         // the commas inside force_style), not shell quoting: with an
         // argument array there is no shell to strip them.
-        val filter = "subtitles='${assFile.absolutePath}':fontsdir='${fontDir.absolutePath}':force_style='FontName=${style.font.familyName},FontSize=${style.size},PrimaryColour=${style.assColor()},OutlineColour=&H80000000&,BorderStyle=${style.background.assBorderStyle},Outline=3,Alignment=${style.position.assAlignment},MarginV=${style.marginV()}'"
+        // MarginV here must match the scaled value in the ASS style:
+        // force_style overrides the style line, so an unscaled 140 would
+        // undo the proportional bottom margin on horizontal video.
+        val filter = "subtitles='${assFile.absolutePath}':fontsdir='${fontDir.absolutePath}':force_style='FontName=${style.font.familyName},FontSize=${style.size},PrimaryColour=${style.assColor()},OutlineColour=&H80000000&,BorderStyle=${style.background.assBorderStyle},Outline=3,Alignment=${style.position.assAlignment},MarginV=${SubtitleFormat.scaledMarginV(style, playResY)}'"
         val arguments = arrayOf(
             "-y",
             "-i", inputVideo.absolutePath,

@@ -104,7 +104,7 @@ object VoskTranscriber {
             val existing = if (zipFile.exists()) zipFile.length() else 0L
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", "Capeo/1.10")
+            connection.setRequestProperty("User-Agent", "Capeo/1.11")
             connection.connectTimeout = 30_000
             connection.readTimeout = 60_000
             if (existing > 0) {

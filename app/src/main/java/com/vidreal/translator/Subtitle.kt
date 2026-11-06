@@ -62,7 +62,19 @@ object SubtitleFormat {
      * stored in logical order; libass renders it right-to-left.
      * Note: Noto Sans Arabic was tested and dropped a glyph for "ث" in
      * medial position under libass; Noto Naskh Arabic renders it correctly.
+     *
+     * PlayRes must be the REAL video size (1.11 fix): libass scales every
+     * script-unit size by video height / PlayResY. With the old fixed
+     * 1080x1920, a horizontal 1920x1080 video shrank the font to
+     * 1080/1920 = 56% (size 100 looked like 56, max 140 like 79), which
+     * is why enlarging the font never seemed to help on horizontal video.
+     * Vertical video was unaffected because its height really is 1920.
      */
+    /** MarginV scaled to the real video height, so the caption sits the
+     *  same fraction up from the bottom on any video size (140 at 1920
+     *  height, ~79 at 1080). Default PlayResY keeps the old value. */
+    fun scaledMarginV(style: CaptionStyle, playResY: Int): Int =
+        (style.marginV() * playResY / 1920).coerceAtLeast(0)
     /** Split a translated line into words spread evenly over its
      *  segment. Used when the caption language differs from the
      *  spoken language, so English word timings cannot be reused for
@@ -79,7 +91,12 @@ object SubtitleFormat {
         }
     }
 
-    fun toAss(subtitles: List<Subtitle>, style: CaptionStyle = CaptionStyle()): String {
+    fun toAss(
+        subtitles: List<Subtitle>,
+        style: CaptionStyle = CaptionStyle(),
+        playResX: Int = 1080,
+        playResY: Int = 1920,
+    ): String {
         // The style the user picked in the Capeo review screen is the
         // style burned in: font family, size, colour, position and
         // background all come from it, so preview and export match.
@@ -94,14 +111,14 @@ object SubtitleFormat {
         val header = """
             [Script Info]
             ScriptType: v4.00+
-            PlayResX: 1080
-            PlayResY: 1920
+            PlayResX: $playResX
+            PlayResY: $playResY
             WrapStyle: 2
             ScaledBorderAndShadow: yes
 
             [V4+ Styles]
             Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-            Style: Arabic, ${style.font.familyName}, ${style.size}, $baseColour, &H000000FF, &H80000000, $backColour, -1, 0, 0, 0, 100, 100, 0, 0, ${style.background.assBorderStyle}, 3, 0, ${style.position.assAlignment}, 80, 80, ${style.marginV()}, 1
+            Style: Arabic, ${style.font.familyName}, ${style.size}, $baseColour, &H000000FF, &H80000000, $backColour, -1, 0, 0, 0, 100, 100, 0, 0, ${style.background.assBorderStyle}, 3, 0, ${style.position.assAlignment}, 80, 80, ${scaledMarginV(style, playResY)}, 1
 
             [Events]
             Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
